@@ -1075,66 +1075,177 @@ document.getElementById("fileImport").onchange=e=>{
 
 /* ═══ sincronización con Firebase ═══ */
 const CLIENTE = uid();
-let FBapi=null, db=null, auth=null, refDoc=null, pendiente=null, primera=true;
+let FBapi=null, db=null, auth=null, refDoc=null, pendiente=null, ultimoJSON="";
 
 function marcarSync(txt,on){
   const s=document.getElementById("sync");
+  if(!s) return;
   s.className="sync"+(on?"":" off");
   s.lastElementChild.textContent=txt;
+}
+function gateError(msg){
+  const e=document.getElementById("gateErr");
+  if(e) e.textContent=msg||"";
 }
 function empujar(){
   if(!refDoc) return;
   clearTimeout(pendiente);
   pendiente=setTimeout(async()=>{
+    const payload=JSON.stringify(S);
+    if(payload===ultimoJSON){ marcarSync("sincronizado",true); return; }
     try{
-      await FBapi.setDoc(refDoc,{data:JSON.stringify(S),ts:S._ts||Date.now(),cli:CLIENTE});
+      await FBapi.setDoc(refDoc,{data:payload,ts:Date.now(),cli:CLIENTE});
+      ultimoJSON=payload;
       marcarSync("sincronizado",true);
-    }catch(e){ marcarSync("sin conexión",false); }
+    }catch(e){
+      console.warn("setDoc",e);
+      marcarSync("no se guardó: "+(e.code||e.message),false);
+    }
   },900);
 }
-function aplicarRemoto(r){
-  try{
-    const d=JSON.parse(r.data);
-    S=Object.assign(structuredClone(BLANK),d);
-    if(!Array.isArray(S.cuentas)||!S.cuentas.length) S.cuentas=structuredClone(CUENTAS_INI);
-    localStorage.setItem(KEY,JSON.stringify(S));
-    render();
-  }catch(e){}
+
+/* ── fusión de datos local + nube (para no perder nada al entrar) ── */
+function normalizar(d){
+  const o=Object.assign(structuredClone(BLANK),d||{});
+  if(!Array.isArray(o.cuentas)||!o.cuentas.length) o.cuentas=structuredClone(CUENTAS_INI);
+  if(!Array.isArray(o.fijos)) o.fijos=[];
+  if(!Array.isArray(o.ahorros)) o.ahorros=[];
+  if(!o.periodos||typeof o.periodos!=="object") o.periodos={};
+  if(!o.cortes||typeof o.cortes!=="object") o.cortes={};
+  if(!o.presupuestos||typeof o.presupuestos!=="object") o.presupuestos={};
+  return o;
+}
+function unirPorId(a,b){
+  const out=[], vistos=new Set();
+  (a||[]).concat(b||[]).forEach(x=>{
+    if(!x) return;
+    const k=x.id||JSON.stringify(x);
+    if(vistos.has(k)) return;
+    vistos.add(k); out.push(x);
+  });
+  return out;
+}
+function fusionar(local,nube){
+  if(!nube) return local;
+  if(!local) return nube;
+  const r=structuredClone(nube);
+  r.cuentas = unirPorId(nube.cuentas, local.cuentas);
+  r.fijos   = unirPorId(nube.fijos,   local.fijos);
+  r.ahorros = unirPorId(nube.ahorros, local.ahorros);
+  r.cortes       = Object.assign({}, local.cortes||{},       nube.cortes||{});
+  r.presupuestos = Object.assign({}, local.presupuestos||{}, nube.presupuestos||{});
+  r.metaAhorro   = nube.metaAhorro || local.metaAhorro || 0;
+  r.periodos={};
+  const claves=new Set(Object.keys(local.periodos||{}).concat(Object.keys(nube.periodos||{})));
+  claves.forEach(k=>{
+    const L=(local.periodos||{})[k], N=(nube.periodos||{})[k];
+    if(!N){ r.periodos[k]=L; return; }
+    if(!L){ r.periodos[k]=N; return; }
+    r.periodos[k]={
+      ingresos: unirPorId(N.ingresos, L.ingresos),
+      gastos:   unirPorId(N.gastos,   L.gastos),
+      fijos:    Object.assign({}, L.fijos||{}, N.fijos||{}),
+      cerrada:  !!(N.cerrada||L.cerrada)
+    };
+  });
+  return r;
+}
+function aplicarRemoto(d){
+  S=normalizar(d);
+  try{ localStorage.setItem(KEY,JSON.stringify(S)); }catch(e){}
+  const ae=document.activeElement;
+  if(!(ae&&(ae.tagName==="INPUT"||ae.tagName==="SELECT"||ae.tagName==="TEXTAREA"))) render();
 }
 
 window.APP={
   iniciar(api){
     FBapi=api;
-    const app=api.initializeApp(CFG);
-    auth=api.getAuth(app); db=api.getFirestore(app);
+    let app;
+    try{
+      app=api.initializeApp(CFG);
+      auth=api.getAuth(app);
+      db=api.getFirestore(app);
+    }catch(e){
+      gateError("No se pudo cargar Firebase: "+(e.code||e.message));
+      marcarSync("sin conexión",false);
+      return;
+    }
+    const provider=new api.GoogleAuthProvider();
     const gate=document.getElementById("gate");
-    document.getElementById("btnGoogle").onclick=async()=>{
-      document.getElementById("gateErr").textContent="";
-      try{ await api.signInWithPopup(auth,new api.GoogleAuthProvider()); }
-      catch(e){ document.getElementById("gateErr").textContent="No se pudo entrar: "+(e.code||e.message); }
-    };
+
+    async function entrar(){
+      gateError("Abriendo Google…");
+      try{
+        await api.signInWithPopup(auth,provider);
+        gateError("");
+      }catch(err){
+        const c=(err&&err.code)||"";
+        if(c==="auth/popup-blocked"||c==="auth/cancelled-popup-request"||c==="auth/popup-closed-by-user"||c==="auth/operation-not-supported-in-this-environment"){
+          gateError("Redirigiendo a Google…");
+          try{ await api.signInWithRedirect(auth,provider); }
+          catch(e2){ gateError("No se pudo entrar: "+(e2.code||e2.message)); }
+        }else{
+          gateError("No se pudo entrar: "+(c||err.message));
+        }
+      }
+    }
+    document.getElementById("btnGoogle").onclick=entrar;
     document.getElementById("btnSalir").onclick=()=>api.signOut(auth);
-    api.onAuthStateChanged(auth,user=>{
-      if(!user){ gate.classList.remove("hidden"); refDoc=null;
+    api.getRedirectResult(auth).catch(e=>gateError("No se pudo entrar: "+(e.code||e.message)));
+
+    api.onAuthStateChanged(auth, async user=>{
+      if(!user){
+        gate.classList.remove("hidden");
+        refDoc=null; ultimoJSON="";
         document.getElementById("btnSalir").classList.add("hidden");
-        marcarSync("solo en este dispositivo",false); return; }
+        marcarSync("solo en este dispositivo",false);
+        return;
+      }
       gate.classList.add("hidden");
+      gateError("");
       document.getElementById("btnSalir").classList.remove("hidden");
       marcarSync("conectando…",false);
       refDoc=api.doc(db,"usuarios",user.uid);
-      primera=true;
+
+      let nube=null;
+      try{
+        const snap=await api.getDoc(refDoc);
+        if(snap.exists()&&snap.data().data) nube=JSON.parse(snap.data().data);
+      }catch(e){
+        console.warn("getDoc",e);
+        marcarSync("no se pudo leer: "+(e.code||e.message),false);
+      }
+
+      S=normalizar(fusionar(normalizar(S), nube?normalizar(nube):null));
+      try{ localStorage.setItem(KEY,JSON.stringify(S)); }catch(e){}
+      render();
+
+      ultimoJSON="";
+      try{
+        const payload=JSON.stringify(S);
+        await api.setDoc(refDoc,{data:payload,ts:Date.now(),cli:CLIENTE});
+        ultimoJSON=payload;
+        marcarSync("sincronizado",true);
+      }catch(e){
+        console.warn("setDoc",e);
+        marcarSync("no se guardó: "+(e.code||e.message),false);
+      }
+
       api.onSnapshot(refDoc,snap=>{
-        if(!snap.exists()){ marcarSync("sincronizado",true); empujar(); primera=false; return; }
+        if(!snap.exists()) return;
         const r=snap.data();
-        if(r.cli===CLIENTE){ marcarSync("sincronizado",true); primera=false; return; }
-        if((r.ts||0)>(S._ts||0)){ aplicarRemoto(r); if(!primera) toast("Actualizado desde otro dispositivo."); }
-        else if(primera) empujar();
-        marcarSync("sincronizado",true); primera=false;
-      },err=>marcarSync("sin conexión",false));
+        if(r.cli===CLIENTE){ marcarSync("sincronizado",true); return; }
+        if(!r.data || r.data===ultimoJSON){ marcarSync("sincronizado",true); return; }
+        ultimoJSON=r.data;
+        try{ aplicarRemoto(JSON.parse(r.data)); toast("Actualizado desde otro dispositivo."); }catch(e){}
+        marcarSync("sincronizado",true);
+      },err=>{
+        console.warn("onSnapshot",err);
+        marcarSync("sin conexión: "+(err.code||err.message),false);
+      });
     });
   }
 };
-
 render();
 if(usaFB){ document.getElementById("gate").classList.remove("hidden"); }
 window.USA_FB = usaFB;
@@ -1145,12 +1256,12 @@ window.USA_FB = usaFB;
 if(window.USA_FB){
   const V="https://www.gstatic.com/firebasejs/10.12.5/";
   const { initializeApp } = await import(V+"firebase-app.js");
-  const { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged }
+  const { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, signOut, onAuthStateChanged }
     = await import(V+"firebase-auth.js");
-  const { getFirestore, doc, setDoc, onSnapshot }
+  const { getFirestore, doc, getDoc, setDoc, onSnapshot }
     = await import(V+"firebase-firestore.js");
-  window.APP.iniciar({ initializeApp, getAuth, GoogleAuthProvider, signInWithPopup, signOut,
-    onAuthStateChanged, getFirestore, doc, setDoc, onSnapshot });
+  window.APP.iniciar({ initializeApp, getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect,
+    getRedirectResult, signOut, onAuthStateChanged, getFirestore, doc, getDoc, setDoc, onSnapshot });
 }
 </script>
 </body>

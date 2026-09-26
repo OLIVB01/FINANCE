@@ -244,7 +244,7 @@ const CUENTAS_INI=[
   {id:"bac",nombre:"BAC",tipo:"credito",diaCorte:5,diaPago:20},
   {id:"efe",nombre:"Efectivo",tipo:"debito"}
 ];
-const BLANK={cuentas:structuredClone(CUENTAS_INI),fijos:[],periodos:{},ahorros:[],cortes:{},presupuestos:{},metaAhorro:0};
+const BLANK={cuentas:structuredClone(CUENTAS_INI),fijos:[],periodos:{},ahorros:[],cortes:{},pagosCorte:{},presupuestos:{},metaAhorro:0};
 let S=load();
 /* marcas de pagos fijos que ya no existen en la lista: se descartan */
 (function(){
@@ -340,6 +340,14 @@ function estadosDe(c){
     map[ci.key].items.push(g); map[ci.key].total+=g.monto;
   });
   return Object.entries(map).map(([k,v])=>Object.assign({key:k,pagado:!!S.cortes[c.id+"|"+k]},v)).sort((a,b)=>a.corte-b.corte);
+}
+const firmaCargo=i=>i.fecha+"|"+(i.desc||"")+"|"+i.monto;
+const keyPago=(cid,ck,i)=>cid+"|"+ck+"|"+firmaCargo(i);
+const pagadoCargo=(cid,ck,i)=>!!(S.pagosCorte||{})[keyPago(cid,ck,i)];
+function totalesCorte(cid,ck,items){
+  let pag=0,pen=0;
+  (items||[]).forEach(i=>{ if(pagadoCargo(cid,ck,i)) pag+=i.monto; else pen+=i.monto; });
+  return {pag,pen,tot:pag+pen};
 }
 function deudaTarjetas(){
   let t=0; S.cuentas.filter(c=>c.tipo==="credito").forEach(c=>estadosDe(c).forEach(e=>{ if(!e.pagado) t+=e.total; }));
@@ -886,6 +894,7 @@ function vTarjetas(){
         return `<div class="ciclo"><div class="box" style="grid-column:1/-1">
           <div class="k">Corte cerrado del ${fechaLarga(e.corte)}</div>
           <div class="v" style="color:var(--gasto)">${money(e.total)}</div>
+          ${(()=>{const t=totalesCorte(c.id,e.key,e.items); return t.pag>0?`<div class="d">Pagado ${money(t.pag)} · queda ${money(t.pen)}</div>`:"";})()}
           <div class="d ${dd<=3?"urg":""}">${dd<0?`Venció hace ${-dd} día${dd===-1?"":"s"}`:dd===0?"Se paga hoy":`Se paga el ${fechaLarga(e.pago)} · faltan ${dd} día${dd===1?"":"s"}`}</div>
           <button class="btn sm" style="margin-top:9px" data-pagar="${c.id}|${e.key}">Marcar como pagado</button>
           <button class="btn ghost sm" style="margin-top:9px" data-vercorte="${c.id}|${e.key}">Ver detalle</button>
@@ -928,16 +937,39 @@ function vTarjetas(){
     toast("Corte marcado como pagado.",()=>{delete S.cortes[k];save();render();});
   });
   app.querySelectorAll("[data-vercorte]").forEach(b=>b.onclick=()=>{
-    const [cid,key]=b.dataset.vercorte.split("|"), c=cuenta(cid), e=estadosDe(c).find(x=>x.key===key);
-    const items=e?e.items:[];
-    abrirDlg(`<h2>${esc(c.nombre)} · corte del ${fechaCorta(key)}</h2>
-      <p class="muted" style="margin:0 0 10px">Total ${money(e?e.total:0)}</p>
-      ${items.length?`<ul class="list">${items.slice().reverse().map(i=>`<li><div class="rowbtn" style="cursor:default">
-        <div class="li-main"><div class="li-t">${esc(i.desc)}</div><div class="li-s">${fechaCorta(i.fecha)}</div></div>
-        <div class="li-amt">${money(i.monto)}</div></div></li>`).join("")}</ul>`:`<p class="empty">Sin consumos en este corte.</p>`}
-      <div class="acts"><button class="btn ghost" data-close>Cerrar</button></div>`);
+    const [cid,key]=b.dataset.vercorte.split("|");
+    verCorte(cid,key);
   });
   enlazarAvisos();
+}
+function verCorte(cid,key){
+  const c=cuenta(cid); if(!c) return;
+  const e=estadosDe(c).find(x=>x.key===key);
+  const items=e?e.items:[];
+  const t=totalesCorte(cid,key,items);
+  abrirDlg(`<h2>${esc(c.nombre)} · corte del ${fechaCorta(key)}</h2>
+    <div class="grid3" style="margin-bottom:12px">
+      <div class="stat"><div class="k">Pagado</div><div class="v ing">${money(t.pag)}</div></div>
+      <div class="stat"><div class="k">Queda por pagar</div><div class="v gas">${money(t.pen)}</div></div>
+      <div class="stat"><div class="k">Total del corte</div><div class="v cre">${money(t.tot)}</div></div>
+    </div>
+    ${items.length?`<ul class="list">${items.slice().reverse().map(i=>{
+      const kk=keyPago(cid,key,i), on=pagadoCargo(cid,key,i);
+      return `<li><div class="fx ${on?"pagado":""}">
+        <input type="checkbox" data-cargo="${esc(kk)}" ${on?"checked":""} aria-label="Marcar ${esc(i.desc)}">
+        <div class="li-main"><div class="li-t">${esc(i.desc)}</div>
+        <div class="li-s">${fechaCorta(i.fecha)} · ${on?"Pagado":"Pendiente"}</div></div>
+        <div class="li-amt">${money(i.monto)}</div></div></li>`;}).join("")}</ul>`
+      :`<p class="empty">Sin consumos en este corte.</p>`}
+    <div class="acts"><button class="btn ghost" data-close>Cerrar</button></div>`,
+  ()=>{
+    document.querySelectorAll("[data-cargo]").forEach(ch=>ch.onchange=()=>{
+      S.pagosCorte=S.pagosCorte||{};
+      const kk=ch.dataset.cargo;
+      if(ch.checked) S.pagosCorte[kk]={pagado:true,fecha:hoyISO}; else delete S.pagosCorte[kk];
+      save(); render(); verCorte(cid,key);
+    });
+  });
 }
 const clampDia=v=>Math.min(Math.max(parseInt(v,10)||1,1),31);
 function editarCuenta(id){

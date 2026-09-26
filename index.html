@@ -350,6 +350,15 @@ function totalesCorte(cid,ck,items){
   (items||[]).forEach(i=>{ if(pagadoCargo(cid,ck,i)) pag+=i.monto; else pen+=i.monto; });
   return {pag,pen,tot:pag+pen};
 }
+function gruposDeCorte(items){
+  const g={};
+  (items||[]).forEach(i=>{
+    const y=+i.fecha.slice(0,4), mm=+i.fecha.slice(5,7), q=quincenaDe(i.fecha);
+    const k=`${y}-${String(mm).padStart(2,"0")}-Q${q}`;
+    (g[k]=g[k]||{k,y,m:mm-1,q,items:[]}).items.push(i);
+  });
+  return Object.values(g).sort((a,b)=>b.k.localeCompare(a.k));
+}
 function deudaTarjetas(){
   let t=0; S.cuentas.filter(c=>c.tipo==="credito").forEach(c=>estadosDe(c).forEach(e=>{ if(!e.pagado) t+=e.total; }));
   return t;
@@ -491,7 +500,8 @@ function vPanel(){
 
   const filas=[1,2].map(q=>{
     const k=calc(cur.y,cur.m,q), pp=perRO(cur.y,cur.m,q);
-    return `<tr><td>${q}ª quincena</td><td>${money(k.ingresos)}</td><td>${money(k.gastos+k.fijosPagados)}</td><td>${pp.cerrada?money(pp.aporte||0):"—"}</td></tr>`;
+    const act=q===cur.q;
+    return `<tr${act?' style="font-weight:600"':''}><td>${q}ª quincena${act?' <span class="chip">actual</span>':''}</td><td>${money(k.ingresos)}</td><td>${money(k.gastos+k.fijosPagados)}</td><td>${pp.cerrada?money(pp.aporte||0):"—"}</td></tr>`;
   }).join("");
   const k1=calc(cur.y,cur.m,1),k2=calc(cur.y,cur.m,2);
   const mesIng=k1.ingresos+k2.ingresos, mesSal=k1.gastos+k1.fijosPagados+k2.gastos+k2.fijosPagados;
@@ -530,6 +540,7 @@ function vPanel(){
         <div class="d">${money(c.fijosPend)} sin pagar</div></div>
     </div>
 
+    <p class="muted" style="margin:14px 0 6px">Totales generales · no corresponden a esta quincena</p>
     <div class="grid2">
       <div class="stat"><div class="k">Deuda de tarjetas</div><div class="v cre">${money(deuda)}</div><div class="d">cortes sin pagar</div></div>
       <div class="stat"><div class="k">Ahorro general</div><div class="v aho">${money(totalAhorros())}</div>
@@ -564,7 +575,8 @@ function vPanel(){
     </section>`:""}
 
     <section class="card">
-      <h2 style="margin-bottom:10px">${MESES[cur.m][0].toUpperCase()+MESES[cur.m].slice(1)} ${cur.y}</h2>
+      <h2 style="margin-bottom:4px">${MESES[cur.m][0].toUpperCase()+MESES[cur.m].slice(1)} ${cur.y}</h2>
+      <p class="muted" style="margin:0 0 10px">Las dos quincenas del mes. No es solo la que tenés seleccionada arriba.</p>
       <div class="scrollx"><table class="mes">
         <thead><tr><th>Periodo</th><th>Entró</th><th>Salió</th><th>Ahorrado</th></tr></thead>
         <tbody>${filas}<tr><td><strong>Mes</strong></td><td><strong>${money(mesIng)}</strong></td><td><strong>${money(mesSal)}</strong></td><td><strong>${money(mesAho)}</strong></td></tr></tbody>
@@ -954,13 +966,18 @@ function verCorte(cid,key){
       <div class="stat"><div class="k">Queda por pagar</div><div class="v gas">${money(t.pen)}</div></div>
       <div class="stat"><div class="k">Total del corte</div><div class="v cre">${money(t.tot)}</div></div>
     </div>
-    ${items.length?`<ul class="list">${items.slice().reverse().map(i=>{
-      const kk=keyPago(cid,key,i), on=pagadoCargo(cid,key,i);
-      return `<li><div class="fx ${on?"pagado":""}">
-        <input type="checkbox" data-cargo="${esc(kk)}" ${on?"checked":""} aria-label="Marcar ${esc(i.desc)}">
-        <div class="li-main"><div class="li-t">${esc(i.desc)}</div>
-        <div class="li-s">${fechaCorta(i.fecha)} · ${on?"Pagado":"Pendiente"}</div></div>
-        <div class="li-amt">${money(i.monto)}</div></div></li>`;}).join("")}</ul>`
+    ${items.length?gruposDeCorte(items).map(g=>{
+      const st=totalesCorte(cid,key,g.items);
+      return `<div class="head" style="margin:14px 0 6px">
+        <h2 style="font-size:15px">${g.q}ª quincena de ${MESES[g.m]}</h2>
+        <span class="muted">${money(st.tot)}${st.pen>0&&st.pag>0?` · queda ${money(st.pen)}`:""}</span></div>
+      <ul class="list">${g.items.slice().reverse().map(i=>{
+        const kk=keyPago(cid,key,i), on=pagadoCargo(cid,key,i);
+        return `<li><div class="fx ${on?"pagado":""}">
+          <input type="checkbox" data-cargo="${esc(kk)}" ${on?"checked":""} aria-label="Marcar ${esc(i.desc)}">
+          <div class="li-main"><div class="li-t">${esc(i.desc)}</div>
+          <div class="li-s">${fechaCorta(i.fecha)} · ${on?"Pagado":"Pendiente"}</div></div>
+          <div class="li-amt">${money(i.monto)}</div></div></li>`;}).join("")}</ul>`;}).join("")
       :`<p class="empty">Sin consumos en este corte.</p>`}
     <div class="acts"><button class="btn ghost" data-close>Cerrar</button></div>`,
   ()=>{

@@ -246,6 +246,39 @@ const CUENTAS_INI=[
 ];
 const BLANK={cuentas:structuredClone(CUENTAS_INI),fijos:[],periodos:{},ahorros:[],cortes:{},presupuestos:{},metaAhorro:0};
 let S=load();
+
+/* duplicados: firma de contenido y limpieza */
+function firmaDe(x,t){
+  if(!x) return "";
+  const n=v=>String(v==null?"":v).trim().toLowerCase();
+  if(t==="cuenta") return "c|"+n(x.nombre)+"|"+n(x.tipo);
+  if(t==="fijo")   return "f|"+n(x.nombre)+"|"+(+x.monto||0)+"|"+(x.q==null?"":x.q);
+  if(t==="mov")    return "m|"+n(x.fecha)+"|"+n(x.desc)+"|"+(+x.monto||0);
+  return "j|"+JSON.stringify(x);
+}
+function dedupe(arr,t){
+  const out=[], v=new Set();
+  (arr||[]).forEach(x=>{ if(!x) return; const k=firmaDe(x,t); if(v.has(k)) return; v.add(k); out.push(x); });
+  return out;
+}
+function limpiarDuplicados(o){
+  const n=a=>(a||[]).length;
+  let antes=n(o.cuentas)+n(o.fijos)+n(o.ahorros);
+  o.cuentas=dedupe(o.cuentas,"cuenta");
+  o.fijos  =dedupe(o.fijos,"fijo");
+  o.ahorros=dedupe(o.ahorros,"mov");
+  let despues=n(o.cuentas)+n(o.fijos)+n(o.ahorros);
+  Object.values(o.periodos||{}).forEach(p=>{
+    if(!p) return;
+    antes   += n(p.ingresos)+n(p.gastos);
+    p.ingresos=dedupe(p.ingresos,"mov");
+    p.gastos  =dedupe(p.gastos,"mov");
+    despues += n(p.ingresos)+n(p.gastos);
+  });
+  return antes-despues;
+}
+const DUPS = limpiarDuplicados(S);
+if(DUPS>0){ try{ localStorage.setItem(KEY,JSON.stringify(S)); }catch(e){} }
 function load(){
   try{
     const raw=localStorage.getItem(KEY)||localStorage.getItem("quincenas-v2")||localStorage.getItem("quincenas-v1");
@@ -488,6 +521,7 @@ function vPanel(){
       <div class="lbl">Libre para gastar · ${ini} al ${fin} de ${MESES[cur.m]}</div>
       <div class="big ${c.libre<0?"neg":""}">${money(c.libre)}</div>
       <div class="sub">${esc(sub)}</div>
+      <div class="sub" style="opacity:.75">${money(c.ingresos)} ingresos − ${money(c.gastos)} gastos − ${money(c.fijosPagados)} fijos pagados − ${money(c.fijosPend)} fijos pendientes</div>
       <div class="track">
         <div class="bar"><div class="fill" style="width:${gastadoPct.toFixed(1)}%"></div>
         ${d.esteMes?`<div class="day" style="left:${diaPct.toFixed(1)}%"></div>`:""}</div>
@@ -1115,13 +1149,15 @@ function normalizar(d){
   if(!o.presupuestos||typeof o.presupuestos!=="object") o.presupuestos={};
   return o;
 }
-function unirPorId(a,b){
-  const out=[], vistos=new Set();
+function unirPorId(a,b,t){
+  const out=[], ids=new Set(), firmas=new Set();
   (a||[]).concat(b||[]).forEach(x=>{
     if(!x) return;
-    const k=x.id||JSON.stringify(x);
-    if(vistos.has(k)) return;
-    vistos.add(k); out.push(x);
+    const f=firmaDe(x,t);
+    if(x.id&&ids.has(x.id)) return;
+    if(firmas.has(f)) return;
+    if(x.id) ids.add(x.id);
+    firmas.add(f); out.push(x);
   });
   return out;
 }
@@ -1129,9 +1165,9 @@ function fusionar(local,nube){
   if(!nube) return local;
   if(!local) return nube;
   const r=structuredClone(nube);
-  r.cuentas = unirPorId(nube.cuentas, local.cuentas);
-  r.fijos   = unirPorId(nube.fijos,   local.fijos);
-  r.ahorros = unirPorId(nube.ahorros, local.ahorros);
+  r.cuentas = unirPorId(nube.cuentas, local.cuentas, "cuenta");
+  r.fijos   = unirPorId(nube.fijos,   local.fijos,   "fijo");
+  r.ahorros = unirPorId(nube.ahorros, local.ahorros, "mov");
   r.cortes       = Object.assign({}, local.cortes||{},       nube.cortes||{});
   r.presupuestos = Object.assign({}, local.presupuestos||{}, nube.presupuestos||{});
   r.metaAhorro   = nube.metaAhorro || local.metaAhorro || 0;
@@ -1142,8 +1178,8 @@ function fusionar(local,nube){
     if(!N){ r.periodos[k]=L; return; }
     if(!L){ r.periodos[k]=N; return; }
     r.periodos[k]={
-      ingresos: unirPorId(N.ingresos, L.ingresos),
-      gastos:   unirPorId(N.gastos,   L.gastos),
+      ingresos: unirPorId(N.ingresos, L.ingresos, "mov"),
+      gastos:   unirPorId(N.gastos,   L.gastos,   "mov"),
       fijos:    Object.assign({}, L.fijos||{}, N.fijos||{}),
       cerrada:  !!(N.cerrada||L.cerrada)
     };
@@ -1217,6 +1253,7 @@ window.APP={
       }
 
       S=normalizar(fusionar(normalizar(S), nube?normalizar(nube):null));
+      limpiarDuplicados(S);
       try{ localStorage.setItem(KEY,JSON.stringify(S)); }catch(e){}
       render();
 
@@ -1247,6 +1284,7 @@ window.APP={
   }
 };
 render();
+if(DUPS>0) setTimeout(()=>toast(`Se quitaron ${DUPS} registro${DUPS===1?"":"s"} duplicado${DUPS===1?"":"s"}.`),500);
 if(usaFB){ document.getElementById("gate").classList.remove("hidden"); }
 window.USA_FB = usaFB;
 })();

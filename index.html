@@ -323,7 +323,8 @@ function cargosDe(cuentaId){
     Object.entries(p.fijos||{}).forEach(([fid,r])=>{
       if(!r.pagado) return;
       const pl=S.fijos.find(f=>f.id===fid);
-      const cid=r.cuentaId!=null?r.cuentaId:(pl?pl.cuentaId:null);
+      if(!pl) return;
+      const cid=r.cuentaId!=null?r.cuentaId:pl.cuentaId;
       if(cid!==cuentaId) return;
       const [ini,fin]=rangoQ(ys,ms-1,qs);
       out.push({fecha:`${ys}-${String(ms).padStart(2,"0")}-${String(qs===1?ini:fin).padStart(2,"0")}`,

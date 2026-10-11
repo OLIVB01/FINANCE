@@ -246,6 +246,20 @@ const CUENTAS_INI=[
 ];
 const BLANK={cuentas:structuredClone(CUENTAS_INI),fijos:[],periodos:{},ahorros:[],cortes:{},pagosCorte:{},presupuestos:{},metaAhorro:0};
 let S=load();
+/* pagos fijos repetidos en la lista maestra (mismo nombre, monto y quincena) */
+function firmaFijo(f){
+  return String(f&&f.nombre||"").trim().toLowerCase()+"|"+(+(f&&f.monto)||0)+"|"+(f&&f.q==null?"":f.q);
+}
+function unicosFijos(arr){
+  const out=[], v=new Set();
+  (arr||[]).forEach(f=>{ if(!f) return; const k=firmaFijo(f); if(v.has(k)) return; v.add(k); out.push(f); });
+  return out;
+}
+(function(){
+  const antes=(S.fijos||[]).length;
+  S.fijos=unicosFijos(S.fijos);
+  if(S.fijos.length<antes){ try{ localStorage.setItem(KEY,JSON.stringify(S)); }catch(e){} }
+})();
 /* marcas de pagos fijos que ya no existen en la lista: se descartan */
 (function(){
   const vivos=new Set((S.fijos||[]).map(f=>f.id));
@@ -1187,12 +1201,12 @@ function normalizar(d){
   return o;
 }
 function unirPorId(a,b){
-  const out=[], vistos=new Set();
+  const out=[], ids=new Set();
   (a||[]).concat(b||[]).forEach(x=>{
     if(!x) return;
     const k=x.id||JSON.stringify(x);
-    if(vistos.has(k)) return;
-    vistos.add(k); out.push(x);
+    if(ids.has(k)) return;
+    ids.add(k); out.push(x);
   });
   return out;
 }
@@ -1201,7 +1215,7 @@ function fusionar(local,nube){
   if(!local) return nube;
   const r=structuredClone(nube);
   r.cuentas = unirPorId(nube.cuentas, local.cuentas);
-  r.fijos   = unirPorId(nube.fijos,   local.fijos);
+  r.fijos   = unicosFijos(unirPorId(nube.fijos,   local.fijos));
   r.ahorros = unirPorId(nube.ahorros, local.ahorros);
   r.cortes       = Object.assign({}, local.cortes||{},       nube.cortes||{});
   r.presupuestos = Object.assign({}, local.presupuestos||{}, nube.presupuestos||{});

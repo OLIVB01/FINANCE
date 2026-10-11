@@ -454,7 +454,7 @@ function avisos(){
 /* ═══ render ═══ */
 const CATS=["Comida","Súper","Transporte","Casa","Salud","Estudio","Gym","Ropa","Ocio","Familia","Otros"];
 const COLORES=["#C0392B","#9C6B12","#22608F","#177A57","#7238A0","#8A5A3B","#4B6B7A"];
-let vista="panel", filtroCuenta="todas", busqueda="", filtroFQ="todas";
+let vista="panel", filtroCuenta="todas", busqueda="", filtroFQ="todas", catAbierta="";
 const app=document.getElementById("app");
 
 function render(){
@@ -482,6 +482,12 @@ function renderPeriodo(){
 const optCuentas=(sel,inc0)=>(inc0?`<option value="">Sin medio</option>`:"")+
   S.cuentas.map(c=>`<option value="${c.id}" ${c.id===sel?"selected":""}>${esc(c.nombre)}${c.tipo==="credito"?" (crédito)":""}</option>`).join("");
 
+function detalleCat(c,k){
+  const out = k==="Pagos fijos"
+    ? c.lista.filter(f=>f.pagado).map(f=>({d:f.nombre||"Pago fijo",f:"",m:f.monto}))
+    : (c.p.gastos||[]).filter(g=>(g.cat||"Otros")===k).map(g=>({d:g.desc||"Gasto",f:g.fecha,m:g.monto}));
+  return out.sort((a,b)=>b.m-a.m);
+}
 function pintaAvisos(){
   const av=avisos(); if(!av.length) return "";
   return `<div class="avisos">${av.map((a,i)=>`
@@ -507,7 +513,9 @@ function vPanel(){
     : `En cuenta ${money(c.enCuenta)} · Fijos pendientes ${money(c.fijosPend)}${d.esteMes?` · Quedan ${d.restantes} día${d.restantes===1?"":"s"}`:""}`;
 
   const porCat={}; c.p.gastos.forEach(g=>{const k=g.cat||"Otros";porCat[k]=(porCat[k]||0)+g.monto;});
-  const cats=Object.entries(porCat).sort((a,b)=>b[1]-a[1]); const maxCat=cats.length?cats[0][1]:1;
+  const catsTmp=Object.entries(porCat);
+  if(c.fijosPagados>0) catsTmp.push(["Pagos fijos",c.fijosPagados]);
+  const cats=catsTmp.sort((a,b)=>b[1]-a[1]); const maxCat=cats.length?cats[0][1]:1;
 
   const porCuenta={};
   c.p.gastos.forEach(g=>{const k=g.cuentaId||"";porCuenta[k]=(porCuenta[k]||0)+g.monto;});
@@ -570,9 +578,14 @@ function vPanel(){
       ${cats.length?`<div class="cat">${cats.map(([k,v],i)=>{
         const tope=S.presupuestos[k]||0;
         const base=Math.max(maxCat,tope||0);
-        return `<div class="row"><span>${esc(k)}</span><span>${money(v)}${tope?`<span class="r"> de ${money(tope)}</span>`:""}</span></div>
+        const abierta=catAbierta===k;
+        const det=abierta?detalleCat(c,k):[];
+        return `<div class="row" data-cat="${esc(k)}" style="cursor:pointer"><span>${abierta?"\u25be":"\u25b8"} ${esc(k)}</span><span>${money(v)}${tope?`<span class="r"> de ${money(tope)}</span>`:""}</span></div>
         <div class="b"><i style="width:${pct(v,base).toFixed(1)}%;background:${tope&&v>tope?"var(--gasto)":COLORES[i%COLORES.length]}"></i>
-        ${tope?`<u style="left:${pct(tope,base).toFixed(1)}%"></u>`:""}</div>`;}).join("")}</div>`
+        ${tope?`<u style="left:${pct(tope,base).toFixed(1)}%"></u>`:""}</div>
+        ${abierta?`<ul class="list" style="margin:2px 0 14px">${det.length?det.map(x=>`<li><div class="rowbtn" style="cursor:default">
+          <div class="li-main"><div class="li-t">${esc(x.d)}</div>${x.f?`<div class="li-s">${fechaCorta(x.f)}</div>`:""}</div>
+          <div class="li-amt">${money(x.m)}</div></div></li>`).join(""):`<li><p class="empty">Sin detalle.</p></li>`}</ul>`:""}`;}).join("")}</div>`
         :`<p class="empty">Todavía no hay gastos en esta quincena.</p>`}
     </section>
 
@@ -605,6 +618,10 @@ function vPanel(){
       alcR.style.color="var(--gasto)";
     }
   };
+  app.querySelectorAll("[data-cat]").forEach(b=>b.onclick=()=>{
+    catAbierta = catAbierta===b.dataset.cat ? "" : b.dataset.cat;
+    render();
+  });
   const bc=document.getElementById("btnCerrar"); if(bc) bc.onclick=()=>cerrarQuincena(c);
   const br=document.getElementById("btnReabrir"); if(br) br.onclick=()=>{
     const p=per(); S.ahorros=S.ahorros.filter(x=>x.ref!==pkey(cur.y,cur.m,cur.q));

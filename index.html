@@ -331,9 +331,10 @@ function ciclo(c,fechaISO){
 }
 function cargosDe(cuentaId){
   const out=[];
+  const cta=cuenta(cuentaId), desde=(cta&&cta.desde)||"";
   Object.entries(S.periodos).forEach(([k,p])=>{
     const ys=+k.slice(0,4), ms=+k.slice(5,7), qs=+k.slice(9,10);
-    (p.gastos||[]).forEach(g=>{ if(g.cuentaId===cuentaId) out.push({fecha:g.fecha,desc:g.desc||"Gasto",monto:g.monto}); });
+    (p.gastos||[]).forEach(g=>{ if(g.cuentaId===cuentaId && (!desde||g.fecha>=desde)) out.push({fecha:g.fecha,desc:g.desc||"Gasto",monto:g.monto}); });
     Object.entries(p.fijos||{}).forEach(([fid,r])=>{
       if(!r.pagado) return;
       const pl=S.fijos.find(f=>f.id===fid);
@@ -341,8 +342,9 @@ function cargosDe(cuentaId){
       const cid=r.cuentaId!=null?r.cuentaId:pl.cuentaId;
       if(cid!==cuentaId) return;
       const [ini,fin]=rangoQ(ys,ms-1,qs);
-      out.push({fecha:`${ys}-${String(ms).padStart(2,"0")}-${String(qs===1?ini:fin).padStart(2,"0")}`,
-        desc:(r.nombre||(pl?pl.nombre:"Pago fijo"))+" (fijo)",monto:r.monto||0});
+      const fch=`${ys}-${String(ms).padStart(2,"0")}-${String(qs===1?ini:fin).padStart(2,"0")}`;
+      if(desde&&fch<desde) return;
+      out.push({fecha:fch,desc:(r.nombre||(pl?pl.nombre:"Pago fijo"))+" (fijo)",monto:r.monto||0});
     });
   });
   return out.sort((a,b)=>a.fecha.localeCompare(b.fecha));
@@ -1015,12 +1017,15 @@ function editarCuenta(id){
       <div></div>
       <div class="field"><span>Día de corte</span><input id="ecC" type="number" min="1" max="31" value="${c.diaCorte||5}"></div>
       <div class="field"><span>Día de pago</span><input id="ecP" type="number" min="1" max="31" value="${c.diaPago||20}"></div>
+      <div class="field full"><span>Contar consumos desde</span><input id="ecDesde" type="date" value="${esc(c.desde||"")}">
+        <small class="muted">Dejalo vacío para contar todo. Útil si ya pagaste cortes viejos y no querés verlos.</small></div>
       <div class="hint" id="ecH"></div>
     </div>
     <div class="acts"><button class="btn danger" id="ecD">Borrar</button><button class="btn ghost" data-close>Cancelar</button><button class="btn" id="ecOk">Guardar</button></div>`,
   ()=>{
     const t=document.getElementById("ecT"),cc=document.getElementById("ecC"),pp=document.getElementById("ecP"),h=document.getElementById("ecH");
-    const sync=()=>{const cr=t.value==="credito"; cc.disabled=!cr; pp.disabled=!cr;
+    const dd=document.getElementById("ecDesde");
+    const sync=()=>{const cr=t.value==="credito"; cc.disabled=!cr; pp.disabled=!cr; dd.disabled=!cr;
       if(!cr){h.className="hint off";return;} h.className="hint";
       const pv=ciclo({tipo:"credito",diaCorte:clampDia(cc.value),diaPago:clampDia(pp.value)},hoyISO);
       h.textContent=`Un consumo de hoy entra al corte del ${fechaLarga(pv.corte)} y se paga el ${fechaLarga(pv.pago)}.`;};
@@ -1029,8 +1034,11 @@ function editarCuenta(id){
       const n=document.getElementById("ecN").value.trim();
       if(!n) return toast("Ponele un nombre.");
       c.nombre=n; c.tipo=t.value;
-      if(c.tipo==="credito"){c.diaCorte=clampDia(cc.value);c.diaPago=clampDia(pp.value);}
-      else {delete c.diaCorte;delete c.diaPago;}
+      if(c.tipo==="credito"){
+        c.diaCorte=clampDia(cc.value); c.diaPago=clampDia(pp.value);
+        const d=(document.getElementById("ecDesde").value||"").trim();
+        if(d) c.desde=d; else delete c.desde;
+      } else {delete c.diaCorte;delete c.diaPago;delete c.desde;}
       save(); cerrarDlg(); render(); toast("Cuenta actualizada.");
     };
     document.getElementById("ecD").onclick=()=>{

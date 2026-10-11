@@ -530,23 +530,17 @@ function vPanel(){
       <div class="lbl">Libre para gastar · ${ini} al ${fin} de ${MESES[cur.m]}</div>
       <div class="big ${c.libre<0?"neg":""}">${money(c.libre)}</div>
       <div class="sub">${esc(sub)}</div>
-      <div class="track">
-        <div class="bar"><div class="fill" style="width:${gastadoPct.toFixed(1)}%"></div>
-        ${d.esteMes?`<div class="day" style="left:${diaPct.toFixed(1)}%"></div>`:""}</div>
-        <div class="legend"><span>${c.ingresos>0?Math.round(gastadoPct)+"% del ingreso usado":"Sin ingresos registrados"}</span><span>${d.esteMes?"la línea es hoy":""}</span></div>
-      </div>
+      <div class="sub" style="opacity:.75">${c.ingresos>0
+        ?`Llevás gastados ${money(usado)} de los ${money(c.ingresos)} que entraron`
+        :"Todavía no registraste el ingreso de esta quincena"}${d.esteMes&&d.restantes>0?` · quedan ${d.restantes} día${d.restantes===1?"":"s"}`:""}.</div>
     </section>
 
-    ${d.esteMes&&!c.p.cerrada?`<section class="card">
-      <h2>Ritmo de gasto</h2>
-      <div class="dual">
-        <div class="col"><div class="k">Podés gastar al día</div><div class="v" style="color:${diarioReal>diarioDisp?"var(--gasto)":"var(--ingreso)"}">${money(diarioDisp)}</div></div>
-        <div class="col"><div class="k">Vas gastando al día</div><div class="v">${money(diarioReal)}</div></div>
-      </div>
-      <p class="muted" style="margin:10px 0 0">${d.restantes>0
-        ? (diarioReal>diarioDisp?`A este ritmo no llegás al ${fin} de ${MESES[cur.m]}.`:`A este ritmo llegás bien al cierre de la quincena.`)
-        : "Último día de la quincena."}</p>
-    </section>`:""}
+    <section class="card">
+      <h2 style="margin-bottom:4px">¿Me alcanza para…?</h2>
+      <p class="muted" style="margin:0 0 10px">Escribí cuánto cuesta y te digo si entra en lo que te queda.</p>
+      <div class="field full"><span>Precio</span><input id="alcM" type="number" inputmode="decimal" min="0" step="any" placeholder="0"></div>
+      <p id="alcR" class="muted" style="margin:10px 0 0"></p>
+    </section>
 
     <div class="grid3">
       <div class="stat"><div class="k">Ingresos</div><div class="v ing">${money(c.ingresos)}</div></div>
@@ -599,6 +593,18 @@ function vPanel(){
       </table></div>
     </section>`;
 
+  const alcM=document.getElementById("alcM"), alcR=document.getElementById("alcR");
+  if(alcM) alcM.oninput=()=>{
+    const v=num(alcM.value);
+    if(!(v>0)){ alcR.textContent=""; alcR.style.color=""; return; }
+    const resto=c.libre-v;
+    if(resto>=0){ alcR.textContent=`Sí. Te quedarían ${money(resto)} de esta quincena.`; alcR.style.color="var(--ingreso)"; }
+    else {
+      const falta=-resto, aho=totalAhorros();
+      alcR.textContent=`No. Te faltan ${money(falta)}`+(aho>=falta?` · con el ahorro general (${money(aho)}) sí alcanzaría.`:".");
+      alcR.style.color="var(--gasto)";
+    }
+  };
   const bc=document.getElementById("btnCerrar"); if(bc) bc.onclick=()=>cerrarQuincena(c);
   const br=document.getElementById("btnReabrir"); if(br) br.onclick=()=>{
     const p=per(); S.ahorros=S.ahorros.filter(x=>x.ref!==pkey(cur.y,cur.m,cur.q));

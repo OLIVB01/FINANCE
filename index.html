@@ -246,6 +246,20 @@ const CUENTAS_INI=[
 ];
 const BLANK={cuentas:structuredClone(CUENTAS_INI),fijos:[],periodos:{},ahorros:[],cortes:{},pagosCorte:{},presupuestos:{},metaAhorro:0};
 let S=load();
+/* la cuenta y el monto de un pago fijo viven en la lista maestra, no en cada quincena */
+(function(){
+  let n=0;
+  const maestro={}; (S.fijos||[]).forEach(f=>{ maestro[f.id]=f; });
+  Object.values(S.periodos||{}).forEach(p=>{
+    if(!p||!p.fijos) return;
+    Object.entries(p.fijos).forEach(([id,r])=>{
+      if(!r) return;
+      if(r.cuentaId!==undefined){ delete r.cuentaId; n++; }
+      if(maestro[id] && r.monto===maestro[id].monto){ delete r.monto; n++; }
+    });
+  });
+  if(n>0){ try{ localStorage.setItem(KEY,JSON.stringify(S)); }catch(e){} }
+})();
 /* pagos fijos repetidos en la lista maestra (mismo nombre, monto y quincena) */
 function firmaFijo(f){
   return String(f&&f.nombre||"").trim().toLowerCase()+"|"+(+(f&&f.monto)||0)+"|"+(f&&f.q==null?"":f.q);
@@ -339,7 +353,7 @@ function cargosDe(cuentaId){
       if(!r.pagado) return;
       const pl=S.fijos.find(f=>f.id===fid);
       if(!pl) return;
-      const cid=r.cuentaId!=null?r.cuentaId:pl.cuentaId;
+      const cid=pl.cuentaId!=null?pl.cuentaId:r.cuentaId;
       if(cid!==cuentaId) return;
       const [ini,fin]=rangoQ(ys,ms-1,qs);
       const fch=`${ys}-${String(ms).padStart(2,"0")}-${String(qs===1?ini:fin).padStart(2,"0")}`;
@@ -391,7 +405,7 @@ function calc(y=cur.y,m=cur.m,q=cur.q){
   const lista=fijosDeQ(q).map(f=>{
     const r=p.fijos[f.id]||{};
     return {id:f.id,nombre:f.nombre,monto:r.monto!=null?r.monto:f.monto,pagado:!!r.pagado,
-      cuentaId:r.cuentaId!=null?r.cuentaId:f.cuentaId};
+      cuentaId:f.cuentaId};
   });
   const fijosPagados=sum(lista.filter(f=>f.pagado),f=>f.monto);
   const fijosPend=sum(lista.filter(f=>!f.pagado),f=>f.monto);
@@ -889,12 +903,16 @@ function vFijos(){
     </section>`;
   app.querySelectorAll("[data-pag]").forEach(ch=>ch.onchange=()=>{
     const p=per(),id=ch.dataset.pag,f=c.lista.find(x=>x.id===id);
-    p.fijos[id]=Object.assign({},p.fijos[id],{pagado:ch.checked,monto:f.monto,nombre:f.nombre,cuentaId:f.cuentaId});
+    p.fijos[id]=Object.assign({},p.fijos[id],{pagado:ch.checked,nombre:f.nombre});
+    delete p.fijos[id].cuentaId;
     save(); render();
   });
   app.querySelectorAll("[data-monto]").forEach(i=>i.onchange=()=>{
     const p=per(),id=i.dataset.monto,f=c.lista.find(x=>x.id===id);
-    p.fijos[id]=Object.assign({},p.fijos[id],{monto:num(i.value),nombre:f.nombre,cuentaId:f.cuentaId});
+    const pl=S.fijos.find(x=>x.id===id), v=num(i.value);
+    p.fijos[id]=Object.assign({},p.fijos[id],{nombre:f.nombre});
+    delete p.fijos[id].cuentaId;
+    if(pl && v===pl.monto) delete p.fijos[id].monto; else p.fijos[id].monto=v;
     save(); render();
   });
   document.getElementById("fAdd").onclick=()=>{

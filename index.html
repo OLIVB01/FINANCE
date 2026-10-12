@@ -247,10 +247,10 @@ const CUENTAS_INI=[
 const BLANK={cuentas:structuredClone(CUENTAS_INI),fijos:[],periodos:{},ahorros:[],cortes:{},pagosCorte:{},presupuestos:{},metaAhorro:0};
 let S=load();
 /* la cuenta y el monto de un pago fijo viven en la lista maestra, no en cada quincena */
-(function(){
+function normalizarFijos(o){
   let n=0;
-  const maestro={}; (S.fijos||[]).forEach(f=>{ maestro[f.id]=f; });
-  Object.values(S.periodos||{}).forEach(p=>{
+  const maestro={}; (o.fijos||[]).forEach(f=>{ maestro[f.id]=f; });
+  Object.values(o.periodos||{}).forEach(p=>{
     if(!p||!p.fijos) return;
     Object.entries(p.fijos).forEach(([id,r])=>{
       if(!r) return;
@@ -258,8 +258,9 @@ let S=load();
       if(maestro[id] && r.monto===maestro[id].monto){ delete r.monto; n++; }
     });
   });
-  if(n>0){ try{ localStorage.setItem(KEY,JSON.stringify(S)); }catch(e){} }
-})();
+  return n;
+}
+if(normalizarFijos(S)>0){ try{ localStorage.setItem(KEY,JSON.stringify(S)); }catch(e){} }
 /* pagos fijos repetidos en la lista maestra (mismo nombre, monto y quincena) */
 function firmaFijo(f){
   return String(f&&f.nombre||"").trim().toLowerCase()+"|"+(+(f&&f.monto)||0)+"|"+(f&&f.q==null?"":f.q);
@@ -1353,6 +1354,7 @@ function fusionar(local,nube){
 }
 function aplicarRemoto(d){
   S=normalizar(d);
+  normalizarFijos(S);
   try{ localStorage.setItem(KEY,JSON.stringify(S)); }catch(e){}
   const ae=document.activeElement;
   if(!(ae&&(ae.tagName==="INPUT"||ae.tagName==="SELECT"||ae.tagName==="TEXTAREA"))) render();
@@ -1418,6 +1420,7 @@ window.APP={
       }
 
       S=normalizar(fusionar(normalizar(S), nube?normalizar(nube):null));
+      normalizarFijos(S);
       try{ localStorage.setItem(KEY,JSON.stringify(S)); }catch(e){}
       render();
 

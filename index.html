@@ -415,6 +415,15 @@ function avisos(){
   const c=calc(), d=progresoDias(), out=[];
   if(c.libre<0)
     out.push({n:"alerta",i:"▲",t:`Te pasaste por <b>${money(-c.libre)}</b> en esta quincena.`,g:"Revisá gastos o movelo del ahorro.",v:"gastos"});
+  const dobles=[];
+  c.lista.filter(f=>f.pagado&&f.monto>0).forEach(f=>{
+    const g=(c.p.gastos||[]).find(x=>Math.round(x.monto)===Math.round(f.monto)&&!dobles.some(d=>d.g===x));
+    if(g) dobles.push({f,g});
+  });
+  if(dobles.length){
+    const tot=dobles.reduce((a,d)=>a+d.g.monto,0);
+    out.push({n:"warn",i:"◆",t:`<b>${money(tot)}</b> puede estar contado dos veces: ${dobles.length===1?"un gasto tiene":dobles.length+" gastos tienen"} el mismo monto que un pago fijo ya marcado como pagado.`,g:"Borrá el gasto o desmarcá el fijo.",v:"gastos"});
+  }
   // ritmo
   if(d.esteMes && d.restantes>0 && c.libre>0){
     const diario=c.libre/d.restantes;
@@ -692,6 +701,22 @@ function vGastos(){
       ${items.length?`<ul class="list">${items.map(g=>fila(g,"gasto")).join("")}</ul>`
         :`<p class="empty">Nada que mostrar con este filtro.</p>`}
     </section>
+
+    ${(()=>{const cc=calc();
+      let fp=cc.lista.filter(f=>f.pagado&&f.monto>0);
+      if(filtroCuenta!=="todas") fp=fp.filter(f=>(f.cuentaId||"")===filtroCuenta);
+      if(busqueda) fp=fp.filter(f=>(f.nombre||"").toLowerCase().includes(busqueda.toLowerCase()));
+      if(!fp.length) return "";
+      return `<section class="card">
+      <div class="head"><h2>Pagos fijos ya pagados</h2><span class="li-amt" style="color:var(--fijo)">${money(sum(fp,f=>f.monto))}</span></div>
+      <p class="muted" style="margin:0 0 10px">No son gastos sueltos, pero sí salieron de tu plata esta quincena. Se editan en la pestaña Pagos fijos.</p>
+      <ul class="list">${fp.slice().sort((a,b)=>b.monto-a.monto).map(f=>{const cc2=cuenta(f.cuentaId);
+        return `<li><div class="rowbtn" style="cursor:default">
+          <div class="li-main"><div class="li-t">${esc(f.nombre)}</div>
+          <div class="li-s"><span class="chip">fijo</span>${cc2?` · <span class="chip ${cc2.tipo==="credito"?"cred":""}">${esc(cc2.nombre)}</span>`:""}</div></div>
+          <div class="li-amt" style="color:var(--fijo)">${money(f.monto)}</div></div></li>`;}).join("")}</ul>
+      <p class="muted" style="margin:10px 0 0">Gastos + fijos de esta quincena: <b>${money(sum(items,g=>g.monto)+sum(fp,f=>f.monto))}</b></p>
+    </section>`;})()}
 
     <section class="card">
       <div class="head"><h2>Topes por categoría</h2><button class="btn ghost sm" id="btnTopes">Ajustar</button></div>

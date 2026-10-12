@@ -927,7 +927,8 @@ function vTarjetas(){
       const g=sum(cargosDe(c.id),x=>x.monto);
       return `<div class="tarjeta"><div class="tt"><h3>${esc(c.nombre)}</h3>
         <button class="btn ghost sm" data-editc="${c.id}">Editar</button></div>
-        <p class="muted">Débito o efectivo · ${money(g)} movidos en total</p></div>`;
+        <p class="muted">Débito o efectivo · ${money(g)} movidos en total</p>
+        <button class="btn ghost sm" style="margin-top:8px" data-vercta="${c.id}">Ver movimientos de la quincena</button></div>`;
     }
     const ests=estadosDe(c), act=ciclo(c,hoyISO);
     const enCurso=ests.find(e=>e.key===act.key)||{corte:act.corte,pago:act.pago,total:0,items:[],key:act.key};
@@ -954,6 +955,7 @@ function vTarjetas(){
           <button class="btn ghost sm" style="margin-top:9px" data-vercorte="${c.id}|${e.key}">Ver detalle</button>
         </div></div>`;}).join(""):`<p class="muted" style="margin-top:10px">No hay cortes cerrados sin pagar.</p>`}
       <button class="btn ghost sm" style="margin-top:10px" data-vercorte="${c.id}|${enCurso.key}">Ver consumos del corte en curso</button>
+      <button class="btn ghost sm" style="margin-top:10px" data-vercta="${c.id}">Ver movimientos de la quincena</button>
     </div>`;
   }).join("");
 
@@ -985,6 +987,7 @@ function vTarjetas(){
     if(o.tipo==="credito"){o.diaCorte=clampDia(document.getElementById("nCorte").value);o.diaPago=clampDia(document.getElementById("nPago").value);}
     S.cuentas.push(o); save(); render(); toast("Cuenta agregada.");
   };
+  app.querySelectorAll("[data-vercta]").forEach(b=>b.onclick=()=>verCuenta(b.dataset.vercta));
   app.querySelectorAll("[data-editc]").forEach(b=>b.onclick=()=>editarCuenta(b.dataset.editc));
   app.querySelectorAll("[data-pagar]").forEach(b=>b.onclick=()=>{
     const k=b.dataset.pagar; S.cortes[k]={pagado:true,fecha:hoyISO}; save(); render();
@@ -995,6 +998,43 @@ function vTarjetas(){
     verCorte(cid,key);
   });
   enlazarAvisos();
+}
+function movsCuenta(cid){
+  const c=calc();
+  const gastos=(c.p.gastos||[]).filter(g=>(g.cuentaId||"")===cid)
+    .map(g=>({d:g.desc||"Gasto",f:g.fecha,m:g.monto}));
+  const fijos=c.lista.filter(f=>f.pagado&&(f.cuentaId||"")===cid)
+    .map(f=>({d:f.nombre||"Pago fijo",f:"",m:f.monto}));
+  const pend=c.lista.filter(f=>!f.pagado&&(f.cuentaId||"")===cid)
+    .map(f=>({d:f.nombre||"Pago fijo",f:"",m:f.monto}));
+  const ing=(c.p.ingresos||[]).filter(i=>(i.cuentaId||"")===cid)
+    .map(i=>({d:i.desc||"Ingreso",f:i.fecha,m:i.monto}));
+  const sum1=a=>a.reduce((x,y)=>x+y.m,0);
+  return {gastos,fijos,pend,ing,tGastos:sum1(gastos),tFijos:sum1(fijos),tPend:sum1(pend),tIng:sum1(ing)};
+}
+function verCuenta(cid){
+  const cta=cuenta(cid); if(!cta) return;
+  const v=movsCuenta(cid);
+  const salida=v.tGastos+v.tFijos;
+  const bloque=(titulo,arr,color)=>arr.length?`<div class="head" style="margin:14px 0 6px">
+      <h2 style="font-size:15px">${titulo}</h2><span class="muted">${money(arr.reduce((a,b)=>a+b.m,0))}</span></div>
+    <ul class="list">${arr.slice().sort((a,b)=>b.m-a.m).map(x=>`<li><div class="rowbtn" style="cursor:default">
+      <div class="li-main"><div class="li-t">${esc(x.d)}</div>${x.f?`<div class="li-s">${fechaCorta(x.f)}</div>`:""}</div>
+      <div class="li-amt"${color?` style="color:${color}"`:""}>${money(x.m)}</div></div></li>`).join("")}</ul>`:"";
+  abrirDlg(`<h2>${esc(cta.nombre)} · ${cur.q}ª quincena de ${MESES[cur.m]}</h2>
+    <div class="grid3" style="margin:10px 0 2px">
+      <div class="stat"><div class="k">Gastos</div><div class="v gas">${money(v.tGastos)}</div></div>
+      <div class="stat"><div class="k">Fijos pagados</div><div class="v fij">${money(v.tFijos)}</div></div>
+      <div class="stat"><div class="k">Total salido</div><div class="v cre">${money(salida)}</div></div>
+    </div>
+    ${v.tIng>0?`<p class="muted" style="margin:8px 0 0">Entró por esta cuenta: ${money(v.tIng)}</p>`:""}
+    ${v.tPend>0?`<p class="muted" style="margin:6px 0 0">Fijos sin pagar todavía: ${money(v.tPend)}</p>`:""}
+    ${bloque("Gastos",v.gastos,"")}
+    ${bloque("Pagos fijos pagados",v.fijos,"var(--fijo)")}
+    ${bloque("Fijos pendientes",v.pend,"var(--muted)")}
+    ${bloque("Ingresos",v.ing,"var(--ingreso)")}
+    ${salida===0&&v.tIng===0?`<p class="empty">Sin movimientos en esta quincena.</p>`:""}
+    <div class="acts"><button class="btn ghost" data-close>Cerrar</button></div>`);
 }
 function verCorte(cid,key){
   const c=cuenta(cid); if(!c) return;

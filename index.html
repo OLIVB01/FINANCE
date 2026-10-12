@@ -397,7 +397,8 @@ function calc(y=cur.y,m=cur.m,q=cur.q){
   const fijosPend=sum(lista.filter(f=>!f.pagado),f=>f.monto);
   return {p,ingresos,gastos,gastosCred,lista,fijosPagados,fijosPend,
     enCuenta:ingresos-(gastos-gastosCred)-fijosPagados,
-    libre:ingresos-gastos-fijosPagados-fijosPend};
+    libre:ingresos-gastos-fijosPagados,
+    trasFijos:ingresos-gastos-fijosPagados-fijosPend};
 }
 const totalAhorros=()=>sum(S.ahorros,a=>a.monto);
 function progresoDias(){
@@ -422,7 +423,7 @@ function avisos(){
       out.push({n:"warn",i:"◆",t:`Vas gastando <b>${money(gastadoDia)}</b> por día y de aquí al cierre solo te alcanza para <b>${money(diario)}</b> diarios.`,g:"Bajale el ritmo o va a quedar corto."});
   }
   if(d.terminada && !c.p.cerrada && (c.ingresos>0||c.gastos>0))
-    out.push({n:"info",i:"●",t:"Esta quincena ya terminó y no la has cerrado.",g:`Podés mandar ${money(Math.max(c.libre,0))} al ahorro.`,v:"panel"});
+    out.push({n:"info",i:"●",t:"Esta quincena ya terminó y no la has cerrado.",g:`Podés mandar ${money(Math.max(c.trasFijos,0))} al ahorro.`,v:"panel"});
   if(c.fijosPend>0 && (d.terminada || (d.esteMes&&d.restantes<=3)))
     out.push({n:"warn",i:"◆",t:`Faltan <b>${money(c.fijosPend)}</b> de pagos fijos sin marcar.`,g:"Quedan pocos días de la quincena.",v:"fijos"});
   if(c.ingresos===0 && (c.gastos>0||d.transcurridos>3))
@@ -510,7 +511,7 @@ function vPanel(){
 
   const sub=c.p.cerrada
     ? `Quincena cerrada · ${money(c.p.aporte||0)} pasaron a ahorros`
-    : `En cuenta ${money(c.enCuenta)} · Fijos pendientes ${money(c.fijosPend)}${d.esteMes?` · Quedan ${d.restantes} día${d.restantes===1?"":"s"}`:""}`;
+    : `En cuenta ${money(c.enCuenta)}${d.esteMes?` · Quedan ${d.restantes} día${d.restantes===1?"":"s"}`:""}`;
 
   const porCat={}; c.p.gastos.forEach(g=>{const k=g.cat||"Otros";porCat[k]=(porCat[k]||0)+g.monto;});
   const catsTmp=Object.entries(porCat);
@@ -541,6 +542,7 @@ function vPanel(){
       <div class="sub" style="opacity:.75">${c.ingresos>0
         ?`Llevás gastados ${money(usado)} de los ${money(c.ingresos)} que entraron`
         :"Todavía no registraste el ingreso de esta quincena"}${d.esteMes&&d.restantes>0?` · quedan ${d.restantes} día${d.restantes===1?"":"s"}`:""}.</div>
+      ${c.fijosPend>0?`<div class="sub" style="opacity:.75">Te faltan por pagar ${money(c.fijosPend)} de fijos — si los pagás todos te quedarían ${money(c.trasFijos)}.</div>`:""}
     </section>
 
     <section class="card">
@@ -570,7 +572,7 @@ function vPanel(){
       ${c.p.cerrada
         ? `<p class="muted">Ya se cerró: ${money(c.p.aporte||0)} al ahorro. <button class="btn ghost sm" id="btnReabrir">Reabrir</button></p>`
         : `<p class="muted">Lo que sobre pasa al ahorro general.</p>
-           <button class="btn" id="btnCerrar" style="margin-top:8px;width:100%">Cerrar quincena y ahorrar ${money(Math.max(c.libre,0))}</button>`}
+           <button class="btn" id="btnCerrar" style="margin-top:8px;width:100%">Cerrar quincena y ahorrar ${money(Math.max(c.trasFijos,0))}</button>`}
     </section>
 
     <section class="card">
@@ -611,7 +613,7 @@ function vPanel(){
     const v=num(alcM.value);
     if(!(v>0)){ alcR.textContent=""; alcR.style.color=""; return; }
     const resto=c.libre-v;
-    if(resto>=0){ alcR.textContent=`Sí. Te quedarían ${money(resto)} de esta quincena.`; alcR.style.color="var(--ingreso)"; }
+    if(resto>=0){ alcR.textContent=`Sí. Te quedarían ${money(resto)} de esta quincena.`+(c.fijosPend>0?` Ojo: te faltan ${money(c.fijosPend)} de fijos por pagar.`:""); alcR.style.color=(c.fijosPend>0&&resto<c.fijosPend)?"var(--gasto)":"var(--ingreso)"; }
     else {
       const falta=-resto, aho=totalAhorros();
       alcR.textContent=`No. Te faltan ${money(falta)}`+(aho>=falta?` · con el ahorro general (${money(aho)}) sí alcanzaría.`:".");
@@ -637,7 +639,7 @@ function enlazarAvisos(){
 function cerrarQuincena(c){
   abrirDlg(`<h2>Cerrar quincena</h2>
     <p class="muted" style="margin:0 0 12px">Lo que sobró pasa al ahorro general.</p>
-    <div class="field"><span>Monto a ahorrar</span><input id="cMonto" type="number" inputmode="decimal" step="any" value="${Math.max(Math.round(c.libre),0)}"></div>
+    <div class="field"><span>Monto a ahorrar</span><input id="cMonto" type="number" inputmode="decimal" step="any" value="${Math.max(Math.round(c.trasFijos),0)}"></div>
     <div class="acts"><button class="btn ghost" data-close>Cancelar</button><button class="btn" id="cOk">Cerrar y ahorrar</button></div>`,
   ()=>{ document.getElementById("cOk").onclick=()=>{
     const monto=num(document.getElementById("cMonto").value);

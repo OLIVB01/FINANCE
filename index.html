@@ -391,7 +391,8 @@ function gruposDeCorte(items){
   return Object.values(g).sort((a,b)=>b.k.localeCompare(a.k));
 }
 function deudaTarjetas(){
-  let t=0; S.cuentas.filter(c=>c.tipo==="credito").forEach(c=>estadosDe(c).forEach(e=>{ if(!e.pagado) t+=e.total; }));
+  let t=0;
+  S.cuentas.filter(c=>c.tipo==="credito").forEach(c=>{ const v=movsCuenta(c.id); t+=v.tGastos+v.tFijos; });
   return t;
 }
 
@@ -586,7 +587,7 @@ function vPanel(){
 
     <p class="muted" style="margin:14px 0 6px">Totales generales · no corresponden a esta quincena</p>
     <div class="grid2">
-      <div class="stat"><div class="k">Deuda de tarjetas</div><div class="v cre">${money(deuda)}</div><div class="d">cortes sin pagar</div></div>
+      <div class="stat"><div class="k">Deuda de tarjetas</div><div class="v cre">${money(deuda)}</div><div class="d">consumido en esta quincena</div></div>
       <div class="stat"><div class="k">Ahorro general</div><div class="v aho">${money(totalAhorros())}</div>
         ${S.metaAhorro>0?`<div class="d">${Math.round(pct(totalAhorros(),S.metaAhorro))}% de ${money(S.metaAhorro)}</div>`:`<div class="d">sin meta definida</div>`}</div>
     </div>
@@ -967,39 +968,29 @@ function editarFijo(id){
 /* ── Tarjetas ── */
 function vTarjetas(){
   const html=S.cuentas.map(c=>{
-    if(c.tipo!=="credito"){
-      const g=sum(cargosDe(c.id),x=>x.monto);
-      return `<div class="tarjeta"><div class="tt"><h3>${esc(c.nombre)}</h3>
+    const v=movsCuenta(c.id);
+    const salida=v.tGastos+v.tFijos;
+    const lin=(arr,color)=>arr.slice().sort((a,b)=>b.m-a.m).map(x=>`<li><div class="rowbtn" style="cursor:default">
+      <div class="li-main"><div class="li-t">${esc(x.d)}</div>${x.f?`<div class="li-s">${fechaCorta(x.f)}</div>`:`<div class="li-s"><span class="chip">fijo</span></div>`}</div>
+      <div class="li-amt"${color?` style="color:${color}"`:""}>${money(x.m)}</div></div></li>`).join("");
+    const cred=c.tipo==="credito";
+    return `<div class="tarjeta${cred?" cred":""}">
+      <div class="tt"><h3>${esc(c.nombre)}</h3>${cred?`<span class="chip cred">crédito</span>`:""}
         <button class="btn ghost sm" data-editc="${c.id}">Editar</button></div>
-        <p class="muted">Débito o efectivo · ${money(g)} movidos en total</p>
-        <button class="btn ghost sm" style="margin-top:8px" data-vercta="${c.id}">Ver movimientos de la quincena</button></div>`;
-    }
-    const ests=estadosDe(c), act=ciclo(c,hoyISO);
-    const enCurso=ests.find(e=>e.key===act.key)||{corte:act.corte,pago:act.pago,total:0,items:[],key:act.key};
-    const pend=ests.filter(e=>e.key!==act.key&&!e.pagado&&e.total>0&&e.corte<=HOY);
-    const dCorte=difDias(enCurso.corte,HOY);
-    const prom=ests.length?sum(ests,e=>e.total)/ests.length:0;
-    return `<div class="tarjeta cred">
-      <div class="tt"><h3>${esc(c.nombre)}</h3><span class="chip cred">crédito</span>
-        <button class="btn ghost sm" data-editc="${c.id}">Editar</button></div>
-      <p class="muted">Corta el ${c.diaCorte} de cada mes · se paga el ${c.diaPago}${prom>0?` · promedio ${money(prom)} por corte`:""}</p>
+      <p class="muted">${cred?`Corta el ${c.diaCorte} · se paga el ${c.diaPago}`:"Débito o efectivo"} · ${cur.q}ª quincena de ${MESES[cur.m]}</p>
       <div class="ciclo">
-        <div class="box"><div class="k">Consumo del corte en curso</div><div class="v" style="color:var(--credito)">${money(enCurso.total)}</div>
-          <div class="d">Corta el ${fechaLarga(enCurso.corte)}${dCorte>=0?` · en ${dCorte} día${dCorte===1?"":"s"}`:""}</div></div>
-        <div class="box"><div class="k">Se pagará el</div><div class="v">${fechaLarga(enCurso.pago)}</div>
-          <div class="d">${enCurso.items.length} consumo${enCurso.items.length===1?"":"s"}</div></div>
+        <div class="box"><div class="k">Gastos</div><div class="v gas">${money(v.tGastos)}</div></div>
+        <div class="box"><div class="k">Fijos pagados</div><div class="v fij">${money(v.tFijos)}</div></div>
       </div>
-      ${pend.length?pend.map(e=>{const dd=difDias(e.pago,HOY);
-        return `<div class="ciclo"><div class="box" style="grid-column:1/-1">
-          <div class="k">Corte cerrado del ${fechaLarga(e.corte)}</div>
-          <div class="v" style="color:var(--gasto)">${money(e.total)}</div>
-          ${(()=>{const t=totalesCorte(c.id,e.key,e.items); return t.pag>0?`<div class="d">Pagado ${money(t.pag)} · queda ${money(t.pen)}</div>`:"";})()}
-          <div class="d ${dd<=3?"urg":""}">${dd<0?`Venció hace ${-dd} día${dd===-1?"":"s"}`:dd===0?"Se paga hoy":`Se paga el ${fechaLarga(e.pago)} · faltan ${dd} día${dd===1?"":"s"}`}</div>
-          <button class="btn sm" style="margin-top:9px" data-pagar="${c.id}|${e.key}">Marcar como pagado</button>
-          <button class="btn ghost sm" style="margin-top:9px" data-vercorte="${c.id}|${e.key}">Ver detalle</button>
-        </div></div>`;}).join(""):`<p class="muted" style="margin-top:10px">No hay cortes cerrados sin pagar.</p>`}
-      <button class="btn ghost sm" style="margin-top:10px" data-vercorte="${c.id}|${enCurso.key}">Ver consumos del corte en curso</button>
-      <button class="btn ghost sm" style="margin-top:10px" data-vercta="${c.id}">Ver movimientos de la quincena</button>
+      <div class="ciclo"><div class="box" style="grid-column:1/-1">
+        <div class="k">Total de la quincena</div>
+        <div class="v" style="color:${cred?"var(--credito)":"var(--gasto)"}">${money(salida)}</div>
+        ${v.tPend>0?`<div class="d">Fijos sin pagar todavía: ${money(v.tPend)}</div>`:""}
+        ${v.tIng>0?`<div class="d">Entró por esta cuenta: ${money(v.tIng)}</div>`:""}
+      </div></div>
+      ${v.gastos.length?`<ul class="list" style="margin-top:10px">${lin(v.gastos,"")}</ul>`:""}
+      ${v.fijos.length?`<ul class="list">${lin(v.fijos,"var(--fijo)")}</ul>`:""}
+      ${salida===0?`<p class="empty">Sin movimientos en esta quincena.</p>`:""}
     </div>`;
   }).join("");
 

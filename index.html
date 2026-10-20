@@ -426,10 +426,10 @@ function calc(y=cur.y,m=cur.m,q=cur.q){
 }
 const totalAhorros=()=>sum(S.ahorros,a=>a.monto);
 function porCobrarTodo(){
-  const out=[];
-  Object.entries(S.periodos||{}).forEach(([k,p])=>(p.gastos||[]).forEach(g=>{
+  const out=[], kq=pkey(cur.y,cur.m,cur.q);
+  Object.entries(S.periodos||{}).forEach(([k,p])=>{ if(k!==kq) return; (p.gastos||[]).forEach(g=>{
     if(g.reint&&!g.reintCobrado) out.push({k,g});
-  }));
+  }); });
   return out.sort((a,b)=>(a.g.fecha||"").localeCompare(b.g.fecha||""));
 }
 function progresoDias(){
@@ -593,7 +593,7 @@ function vPanel(){
     ${(()=>{const pc=porCobrarTodo(); if(!pc.length) return "";
       return `<section class="card">
       <div class="head"><h2>Por cobrar</h2><span class="li-amt" style="color:#9C6B12">${money(sum(pc,x=>x.g.monto))}</span></div>
-      <p class="muted" style="margin:0 0 10px">Gastos de trabajo que pagaste vos y te tienen que devolver.</p>
+      <p class="muted" style="margin:0 0 10px">Gastos de trabajo de esta quincena que pagaste vos y te tienen que devolver.</p>
       <ul class="list">${pc.map(x=>`<li><div class="rowbtn" style="cursor:default">
         <div class="li-main"><div class="li-t">${esc(x.g.desc||"Gasto")}</div>
         <div class="li-s">${fechaCorta(x.g.fecha)} · <span class="chip reint">${esc(x.g.reintDe||"trabajo")}</span></div></div>

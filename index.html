@@ -112,6 +112,10 @@ ul.list li:first-child{border-top:0}
 .li-amt{font-family:"Bricolage Grotesque",sans-serif;font-weight:700;letter-spacing:-.02em;white-space:nowrap}
 .chip{display:inline-block;font-size:11.5px;padding:1px 7px;border-radius:99px;border:1px solid var(--line);color:var(--ink-soft);background:var(--sunk)}
 .chip.cred{color:var(--credito);border-color:#E5D4F2;background:#F8F3FC}
+.chip.reint{color:#9C6B12;border-color:#EBD9B4;background:#FBF6EA}
+.chip.reint.ok{color:var(--ingreso);border-color:#BFE3D2;background:#EEF8F3}
+.chk{display:flex;align-items:center;gap:8px;font-size:14px;color:var(--ink);cursor:pointer}
+.chk input{width:18px;height:18px}
 .empty{color:var(--ink-soft);font-size:13.5px;padding:16px 0;text-align:center}
 
 .filtros{display:flex;gap:6px;overflow-x:auto;padding-bottom:4px;margin-bottom:8px;scrollbar-width:none}
@@ -401,9 +405,13 @@ function fijosDeQ(q){ return S.fijos.filter(f=>f.q===0||f.q===q); }
 function listaFQ(){ return filtroFQ==="todas"?S.fijos:fijosDeQ(Number(filtroFQ)); }
 function calc(y=cur.y,m=cur.m,q=cur.q){
   const p=perRO(y,m,q);
-  const ingresos=sum(p.ingresos,i=>i.monto), gastos=sum(p.gastos,g=>g.monto);
+  const propios=p.gastos.filter(g=>!g.reint), reints=p.gastos.filter(g=>g.reint);
+  const ingresos=sum(p.ingresos,i=>i.monto), gastos=sum(propios,g=>g.monto);
   const esCred=id=>{const c=cuenta(id);return !!c&&c.tipo==="credito";};
-  const gastosCred=sum(p.gastos.filter(g=>esCred(g.cuentaId)),g=>g.monto);
+  const gastosCred=sum(propios.filter(g=>esCred(g.cuentaId)),g=>g.monto);
+  const pendR=reints.filter(g=>!g.reintCobrado);
+  const porCobrar=sum(pendR,g=>g.monto), porCobrarCred=sum(pendR.filter(g=>esCred(g.cuentaId)),g=>g.monto);
+  const cobrado=sum(reints.filter(g=>g.reintCobrado),g=>g.monto);
   const lista=fijosDeQ(q).map(f=>{
     const r=p.fijos[f.id]||{};
     return {id:f.id,nombre:f.nombre,monto:r.monto!=null?r.monto:f.monto,pagado:!!r.pagado,
@@ -411,12 +419,19 @@ function calc(y=cur.y,m=cur.m,q=cur.q){
   });
   const fijosPagados=sum(lista.filter(f=>f.pagado),f=>f.monto);
   const fijosPend=sum(lista.filter(f=>!f.pagado),f=>f.monto);
-  return {p,ingresos,gastos,gastosCred,lista,fijosPagados,fijosPend,
-    enCuenta:ingresos-(gastos-gastosCred)-fijosPagados,
-    libre:ingresos-gastos-fijosPagados,
-    trasFijos:ingresos-gastos-fijosPagados-fijosPend};
+  return {p,ingresos,gastos,gastosCred,lista,fijosPagados,fijosPend,porCobrar,cobrado,propios,reints,
+    enCuenta:ingresos-(gastos-gastosCred)-(porCobrar-porCobrarCred)-fijosPagados,
+    libre:ingresos-gastos-fijosPagados-porCobrar,
+    trasFijos:ingresos-gastos-fijosPagados-porCobrar-fijosPend};
 }
 const totalAhorros=()=>sum(S.ahorros,a=>a.monto);
+function porCobrarTodo(){
+  const out=[];
+  Object.entries(S.periodos||{}).forEach(([k,p])=>(p.gastos||[]).forEach(g=>{
+    if(g.reint&&!g.reintCobrado) out.push({k,g});
+  }));
+  return out.sort((a,b)=>(a.g.fecha||"").localeCompare(b.g.fecha||""));
+}
 function progresoDias(){
   const [ini,fin]=rangoQ(cur.y,cur.m,cur.q), total=fin-ini+1;
   const esteMes=hoy.getFullYear()===cur.y&&hoy.getMonth()===cur.m;
@@ -433,7 +448,7 @@ function avisos(){
     out.push({n:"alerta",i:"▲",t:`Te pasaste por <b>${money(-c.libre)}</b> en esta quincena.`,g:"Revisá gastos o movelo del ahorro.",v:"gastos"});
   const dobles=[];
   c.lista.filter(f=>f.pagado&&f.monto>0).forEach(f=>{
-    const g=(c.p.gastos||[]).find(x=>Math.round(x.monto)===Math.round(f.monto)&&!dobles.some(d=>d.g===x));
+    const g=c.propios.find(x=>Math.round(x.monto)===Math.round(f.monto)&&!dobles.some(d=>d.g===x));
     if(g) dobles.push({f,g});
   });
   if(dobles.length){
@@ -466,7 +481,12 @@ function avisos(){
     });
   });
   // presupuestos
-  const porCat={}; c.p.gastos.forEach(g=>{const k=g.cat||"Otros";porCat[k]=(porCat[k]||0)+g.monto;});
+  const porCat={}; c.propios.forEach(g=>{const k=g.cat||"Otros";porCat[k]=(porCat[k]||0)+g.monto;});
+  const pc=porCobrarTodo();
+  if(pc.length){
+    const quienes=[...new Set(pc.map(x=>x.g.reintDe||"trabajo"))].join(", ");
+    out.push({n:"info",i:"●",t:`Te deben <b>${money(sum(pc,x=>x.g.monto))}</b> de gastos que te reintegran (${esc(quienes)}).`,g:"Cuando te paguen, marcalo en Gastos.",v:"gastos"});
+  }
   Object.entries(S.presupuestos||{}).forEach(([k,tope])=>{
     if(!tope) return; const g=porCat[k]||0;
     if(g>tope) out.push({n:"warn",i:"◆",t:`Te pasaste del tope de <b>${esc(k)}</b>: ${money(g)} de ${money(tope)}.`,g:"El tope lo cambiás en Gastos.",v:"gastos"});
@@ -511,7 +531,7 @@ const optCuentas=(sel,inc0)=>(inc0?`<option value="">Sin medio</option>`:"")+
 function detalleCat(c,k){
   const out = k==="Pagos fijos"
     ? c.lista.filter(f=>f.pagado).map(f=>({d:f.nombre||"Pago fijo",f:"",m:f.monto}))
-    : (c.p.gastos||[]).filter(g=>(g.cat||"Otros")===k).map(g=>({d:g.desc||"Gasto",f:g.fecha,m:g.monto}));
+    : c.propios.filter(g=>(g.cat||"Otros")===k).map(g=>({d:g.desc||"Gasto",f:g.fecha,m:g.monto}));
   return out.sort((a,b)=>b.m-a.m);
 }
 function pintaAvisos(){
@@ -527,7 +547,7 @@ function pintaAvisos(){
 function vPanel(){
   const c=calc(), d=progresoDias();
   const [ini,fin]=rangoQ(cur.y,cur.m,cur.q);
-  const usado=c.gastos+c.fijosPagados;
+  const usado=c.gastos+c.fijosPagados+c.porCobrar;
   const gastadoPct=Math.min(pct(usado,c.ingresos),100), diaPct=d.total?d.transcurridos/d.total*100:0;
   const a=anterior(), ca=calc(a.y,a.m,a.q);
   const deltaG=ca.gastos>0?((c.gastos-ca.gastos)/ca.gastos*100):null;
@@ -538,7 +558,7 @@ function vPanel(){
     ? `Quincena cerrada · ${money(c.p.aporte||0)} pasaron a ahorros`
     : `En cuenta ${money(c.enCuenta)}${d.esteMes?` · Quedan ${d.restantes} día${d.restantes===1?"":"s"}`:""}`;
 
-  const porCat={}; c.p.gastos.forEach(g=>{const k=g.cat||"Otros";porCat[k]=(porCat[k]||0)+g.monto;});
+  const porCat={}; c.propios.forEach(g=>{const k=g.cat||"Otros";porCat[k]=(porCat[k]||0)+g.monto;});
   const catsTmp=Object.entries(porCat);
   if(c.fijosPagados>0) catsTmp.push(["Pagos fijos",c.fijosPagados]);
   const cats=catsTmp.sort((a,b)=>b[1]-a[1]); const maxCat=cats.length?cats[0][1]:1;
@@ -551,10 +571,10 @@ function vPanel(){
   const filas=[1,2].map(q=>{
     const k=calc(cur.y,cur.m,q), pp=perRO(cur.y,cur.m,q);
     const act=q===cur.q;
-    return `<tr${act?' style="font-weight:600"':''}><td>${q}ª quincena${act?' <span class="chip">actual</span>':''}</td><td>${money(k.ingresos)}</td><td>${money(k.gastos+k.fijosPagados)}</td><td>${pp.cerrada?money(pp.aporte||0):"—"}</td></tr>`;
+    return `<tr${act?' style="font-weight:600"':''}><td>${q}ª quincena${act?' <span class="chip">actual</span>':''}</td><td>${money(k.ingresos)}</td><td>${money(k.gastos+k.fijosPagados+k.porCobrar)}</td><td>${pp.cerrada?money(pp.aporte||0):"—"}</td></tr>`;
   }).join("");
   const k1=calc(cur.y,cur.m,1),k2=calc(cur.y,cur.m,2);
-  const mesIng=k1.ingresos+k2.ingresos, mesSal=k1.gastos+k1.fijosPagados+k2.gastos+k2.fijosPagados;
+  const mesIng=k1.ingresos+k2.ingresos, mesSal=k1.gastos+k1.fijosPagados+k1.porCobrar+k2.gastos+k2.fijosPagados+k2.porCobrar;
   const mesAho=(perRO(cur.y,cur.m,1).aporte||0)+(perRO(cur.y,cur.m,2).aporte||0);
   const deuda=deudaTarjetas();
 
@@ -568,7 +588,18 @@ function vPanel(){
         ?`Llevás gastados ${money(usado)} de los ${money(c.ingresos)} que entraron`
         :"Todavía no registraste el ingreso de esta quincena"}${d.esteMes&&d.restantes>0?` · quedan ${d.restantes} día${d.restantes===1?"":"s"}`:""}.</div>
       ${c.fijosPend>0?`<div class="sub" style="opacity:.75">Te faltan por pagar ${money(c.fijosPend)} de fijos — si los pagás todos te quedarían ${money(c.trasFijos)}.</div>`:""}
+      ${c.porCobrar>0?`<div class="sub" style="opacity:.75">Por cobrar ${money(c.porCobrar)} de gastos que te reintegran — ya están restados; cuando te paguen vuelven a lo libre.</div>`:""}
     </section>
+    ${(()=>{const pc=porCobrarTodo(); if(!pc.length) return "";
+      return `<section class="card">
+      <div class="head"><h2>Por cobrar</h2><span class="li-amt" style="color:#9C6B12">${money(sum(pc,x=>x.g.monto))}</span></div>
+      <p class="muted" style="margin:0 0 10px">Gastos de trabajo que pagaste vos y te tienen que devolver.</p>
+      <ul class="list">${pc.map(x=>`<li><div class="rowbtn" style="cursor:default">
+        <div class="li-main"><div class="li-t">${esc(x.g.desc||"Gasto")}</div>
+        <div class="li-s">${fechaCorta(x.g.fecha)} · <span class="chip reint">${esc(x.g.reintDe||"trabajo")}</span></div></div>
+        <div class="li-amt">${money(x.g.monto)}</div>
+        <button class="btn ghost sm" data-cobrar="${esc(x.k)}|${esc(x.g.id)}" style="margin-left:8px">Ya me pagaron</button></div></li>`).join("")}</ul>
+    </section>`;})()}
 
     <section class="card">
       <h2 style="margin-bottom:4px">¿Me alcanza para…?</h2>
@@ -649,6 +680,7 @@ function vPanel(){
     catAbierta = catAbierta===b.dataset.cat ? "" : b.dataset.cat;
     render();
   });
+  enlazarCobrar();
   const bc=document.getElementById("btnCerrar"); if(bc) bc.onclick=()=>cerrarQuincena(c);
   const br=document.getElementById("btnReabrir"); if(br) br.onclick=()=>{
     const p=per(); S.ahorros=S.ahorros.filter(x=>x.ref!==pkey(cur.y,cur.m,cur.q));
@@ -656,6 +688,14 @@ function vPanel(){
   };
   enlazarAvisos();
   app.querySelectorAll("[data-filtro]").forEach(b=>b.onclick=()=>{filtroCuenta=b.dataset.filtro||"todas";vista="gastos";render();scrollTo({top:0});});
+}
+function enlazarCobrar(){
+  app.querySelectorAll("[data-cobrar]").forEach(b=>b.onclick=()=>{
+    const [k,id]=b.dataset.cobrar.split("|"); const pp=S.periodos[k]; if(!pp) return;
+    const g=(pp.gastos||[]).find(x=>x.id===id); if(!g) return;
+    g.reintCobrado=true; g.reintFecha=hoyISO; save(); render();
+    toast(`${money(g.monto)} marcados como cobrados.`,()=>{delete g.reintCobrado;delete g.reintFecha;save();render();});
+  });
 }
 function enlazarAvisos(){
   app.querySelectorAll("[data-ir]").forEach(b=>b.onclick=()=>{vista=b.dataset.ir;render();scrollTo({top:0});});
@@ -703,12 +743,15 @@ function vGastos(){
         <div class="field"><span>Se carga a</span><select id="gCta">${optCuentas("",true)}</select></div>
         <div class="field"><span>Fecha</span><input id="gFecha" type="date" min="${cur.y}-${mm}-${String(ini).padStart(2,"0")}" max="${cur.y}-${mm}-${String(fin).padStart(2,"0")}"></div>
         <div class="hint off" id="gHint"></div>
+        <label class="chk full"><input type="checkbox" id="gReint"> Me lo reintegran (gasto de trabajo)</label>
+        <div class="field full" id="gReintBox" style="display:none"><span>¿Quién te lo devuelve?</span><input id="gReintDe" value="EDIFISA"></div>
         <button class="btn full" id="gAdd">Agregar gasto</button>
       </div>
     </section>
 
     <section class="card">
-      <div class="head"><h2>Gastos de la quincena</h2><span class="li-amt" style="color:var(--gasto)">${money(sum(items,g=>g.monto))}</span></div>
+      <div class="head"><h2>Gastos de la quincena</h2><span class="li-amt" style="color:var(--gasto)">${money(sum(items.filter(g=>!g.reint),g=>g.monto))}</span></div>
+      ${items.some(g=>g.reint)?`<p class="muted" style="margin:-4px 0 10px">El total no incluye ${money(sum(items.filter(g=>g.reint),g=>g.monto))} de gastos que te reintegran.</p>`:""}
       <div class="field" style="margin-bottom:10px"><input id="gBusca" placeholder="Buscar por nombre o categoría" value="${esc(busqueda)}"></div>
       <div class="filtros">
         <button data-f="todas" aria-pressed="${filtroCuenta==="todas"}">Todos</button>
@@ -731,7 +774,7 @@ function vGastos(){
           <div class="li-main"><div class="li-t">${esc(f.nombre)}</div>
           <div class="li-s"><span class="chip">fijo</span>${cc2?` · <span class="chip ${cc2.tipo==="credito"?"cred":""}">${esc(cc2.nombre)}</span>`:""}</div></div>
           <div class="li-amt" style="color:var(--fijo)">${money(f.monto)}</div></div></li>`;}).join("")}</ul>
-      <p class="muted" style="margin:10px 0 0">Gastos + fijos de esta quincena: <b>${money(sum(items,g=>g.monto)+sum(fp,f=>f.monto))}</b></p>
+      <p class="muted" style="margin:10px 0 0">Gastos + fijos de esta quincena: <b>${money(sum(items.filter(g=>!g.reint),g=>g.monto)+sum(fp,f=>f.monto))}</b></p>
     </section>`;})()}
 
     <section class="card">
@@ -746,14 +789,17 @@ function vGastos(){
     if(!ci){hint.className="hint off";return;} hint.className="hint";
     hint.textContent=`${c.nombre}: este consumo entra al corte del ${fechaLarga(ci.corte)} y se paga el ${fechaLarga(ci.pago)}.`; };
   fC.onchange=ph; fF.onchange=ph; ph();
+  const gR=document.getElementById("gReint"); gR.onchange=()=>{document.getElementById("gReintBox").style.display=gR.checked?"":"none";};
   document.getElementById("gAdd").onclick=()=>{
     const monto=num(document.getElementById("gMonto").value);
     if(monto<=0) return toast("Escribí un monto mayor a cero.");
     const fecha=fF.value||def;
     if(quincenaDe(fecha)!==cur.q) return toast("Esa fecha cae en la otra quincena.");
-    per().gastos.push({id:uid(),desc:document.getElementById("gDesc").value.trim(),monto,
-      cat:document.getElementById("gCat").value,fecha,cuentaId:fC.value||null});
-    save(); render(); toast("Gasto agregado.");
+    const ng={id:uid(),desc:document.getElementById("gDesc").value.trim(),monto,
+      cat:document.getElementById("gCat").value,fecha,cuentaId:fC.value||null};
+    if(document.getElementById("gReint").checked){ ng.reint=true; ng.reintDe=document.getElementById("gReintDe").value.trim()||"trabajo"; }
+    per().gastos.push(ng);
+    save(); render(); toast(ng.reint?"Gasto agregado como por cobrar.":"Gasto agregado.");
   };
   app.querySelectorAll("[data-rap]").forEach(b=>b.onclick=()=>{
     const f=fr[+b.dataset.rap];
@@ -821,6 +867,9 @@ function fila(x,tipo){
   if(tipo==="gasto"&&x.cat) meta.push(`<span class="chip">${esc(x.cat)}</span>`);
   if(c) meta.push(`<span class="chip ${c.tipo==="credito"?"cred":""}">${esc(c.nombre)}</span>`);
   if(ci) meta.push(`paga ${fechaCorta(isoDe(ci.pago))}`);
+  if(tipo==="gasto"&&x.reint) meta.push(x.reintCobrado
+    ?`<span class="chip reint ok">reintegrado${x.reintDe?" · "+esc(x.reintDe):""}</span>`
+    :`<span class="chip reint">por cobrar${x.reintDe?" · "+esc(x.reintDe):""}</span>`);
   return `<li><button class="rowbtn" data-edit="${x.id}" data-tipo="${tipo}">
     <div class="li-main"><div class="li-t">${esc(x.desc||(tipo==="gasto"?"Gasto":"Ingreso"))}</div>
     <div class="li-s">${meta.join(" · ")}</div></div>
@@ -838,6 +887,9 @@ function editarMov(id,tipo){
       <div class="field"><span>${tipo==="gasto"?"Se carga a":"Entra a"}</span><select id="eCta">${optCuentas(x.cuentaId||"",true)}</select></div>
       <div class="field"><span>Fecha</span><input id="eFecha" type="date" value="${x.fecha}" min="${cur.y}-${mm}-${String(ini).padStart(2,"0")}" max="${cur.y}-${mm}-${String(fin).padStart(2,"0")}"></div>
       <div class="hint off" id="eHint"></div>
+      ${tipo==="gasto"?`<label class="chk full"><input type="checkbox" id="eReint" ${x.reint?"checked":""}> Me lo reintegran (gasto de trabajo)</label>
+      <div class="field" id="eReintBox" style="${x.reint?"":"display:none"}"><span>¿Quién?</span><input id="eReintDe" value="${esc(x.reintDe||"EDIFISA")}"></div>
+      <label class="chk" id="eCobBox" style="${x.reint?"":"display:none"}"><input type="checkbox" id="eCob" ${x.reintCobrado?"checked":""}> Ya me lo pagaron</label>`:""}
     </div>
     <div class="acts"><button class="btn danger" id="eDel">Borrar</button><button class="btn ghost" data-close>Cancelar</button><button class="btn" id="eOk">Guardar</button></div>`,
   ()=>{
@@ -846,12 +898,22 @@ function editarMov(id,tipo){
       if(!ci){hint.className="hint off";return;} hint.className="hint";
       hint.textContent=`${c.nombre}: corte del ${fechaLarga(ci.corte)}, se paga el ${fechaLarga(ci.pago)}.`;};
     cta.onchange=ph; fec.onchange=ph; ph();
+    const eR=document.getElementById("eReint");
+    if(eR) eR.onchange=()=>{const v=eR.checked?"":"none";document.getElementById("eReintBox").style.display=v;document.getElementById("eCobBox").style.display=v;};
     document.getElementById("eOk").onclick=()=>{
       const monto=num(document.getElementById("eMonto").value);
       if(monto<=0) return toast("Escribí un monto mayor a cero.");
       if(quincenaDe(fec.value)!==cur.q) return toast("Esa fecha cae en la otra quincena.");
       x.desc=document.getElementById("eDesc").value.trim(); x.monto=monto;
       if(tipo==="gasto") x.cat=document.getElementById("eCat").value;
+      if(tipo==="gasto"){
+        if(document.getElementById("eReint").checked){
+          x.reint=true; x.reintDe=document.getElementById("eReintDe").value.trim()||"trabajo";
+          const cob=document.getElementById("eCob").checked;
+          if(cob&&!x.reintCobrado) x.reintFecha=hoyISO;
+          if(cob) x.reintCobrado=true; else { delete x.reintCobrado; delete x.reintFecha; }
+        } else { delete x.reint; delete x.reintDe; delete x.reintCobrado; delete x.reintFecha; }
+      }
       x.cuentaId=cta.value||null; x.fecha=fec.value;
       save(); cerrarDlg(); render(); toast("Cambios guardados.");
     };
@@ -980,7 +1042,7 @@ function vTarjetas(){
       return `<li><div class="fx ${on?"pagado":""}">
         <input type="checkbox" data-cargo="${esc(kk)}" ${on?"checked":""} aria-label="Marcar ${esc(x.d)}">
         <div class="li-main"><div class="li-t">${esc(x.d)}</div>
-        <div class="li-s">${x.f?fechaCorta(x.f):`<span class="chip">fijo</span>`} · ${on?"Pagado":"Pendiente"}</div></div>
+        <div class="li-s">${x.f?fechaCorta(x.f):`<span class="chip">fijo</span>`}${x.r?` · <span class="chip reint">reintegro</span>`:""} · ${on?"Pagado":"Pendiente"}</div></div>
         <div class="li-amt">${money(x.m)}</div></div></li>`;}).join("");
     const cred=c.tipo==="credito";
     return `<div class="tarjeta${cred?" cred":""}">
@@ -1048,7 +1110,7 @@ function vTarjetas(){
 function movsCuenta(cid){
   const c=calc();
   const gastos=(c.p.gastos||[]).filter(g=>(g.cuentaId||"")===cid)
-    .map(g=>({d:g.desc||"Gasto",f:g.fecha,m:g.monto}));
+    .map(g=>({d:g.desc||"Gasto",f:g.fecha,m:g.monto,r:!!g.reint}));
   const fijos=c.lista.filter(f=>f.pagado&&(f.cuentaId||"")===cid)
     .map(f=>({d:f.nombre||"Pago fijo",f:"",m:f.monto}));
   const pend=c.lista.filter(f=>!f.pagado&&(f.cuentaId||"")===cid)

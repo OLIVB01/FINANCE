@@ -967,30 +967,35 @@ function editarFijo(id){
 
 /* ── Tarjetas ── */
 function vTarjetas(){
+  const qk=pkey(cur.y,cur.m,cur.q);
   const html=S.cuentas.map(c=>{
     const v=movsCuenta(c.id);
-    const salida=v.tGastos+v.tFijos;
-    const lin=(arr,color)=>arr.slice().sort((a,b)=>b.m-a.m).map(x=>`<li><div class="rowbtn" style="cursor:default">
-      <div class="li-main"><div class="li-t">${esc(x.d)}</div>${x.f?`<div class="li-s">${fechaCorta(x.f)}</div>`:`<div class="li-s"><span class="chip">fijo</span></div>`}</div>
-      <div class="li-amt"${color?` style="color:${color}"`:""}>${money(x.m)}</div></div></li>`).join("");
+    const todos=v.gastos.concat(v.fijos);
+    const marcado=x=>pagadoCargo(c.id,qk,{fecha:x.f,desc:x.d,monto:x.m});
+    let pag=0,pen=0;
+    todos.forEach(x=>{ if(marcado(x)) pag+=x.m; else pen+=x.m; });
+    const salida=pag+pen;
+    const lin=arr=>arr.slice().sort((a,b)=>b.m-a.m).map(x=>{
+      const kk=keyPago(c.id,qk,{fecha:x.f,desc:x.d,monto:x.m}), on=marcado(x);
+      return `<li><div class="fx ${on?"pagado":""}">
+        <input type="checkbox" data-cargo="${esc(kk)}" ${on?"checked":""} aria-label="Marcar ${esc(x.d)}">
+        <div class="li-main"><div class="li-t">${esc(x.d)}</div>
+        <div class="li-s">${x.f?fechaCorta(x.f):`<span class="chip">fijo</span>`} · ${on?"Pagado":"Pendiente"}</div></div>
+        <div class="li-amt">${money(x.m)}</div></div></li>`;}).join("");
     const cred=c.tipo==="credito";
     return `<div class="tarjeta${cred?" cred":""}">
       <div class="tt"><h3>${esc(c.nombre)}</h3>${cred?`<span class="chip cred">crédito</span>`:""}
         <button class="btn ghost sm" data-editc="${c.id}">Editar</button></div>
       <p class="muted">${cred?`Corta el ${c.diaCorte} · se paga el ${c.diaPago}`:"Débito o efectivo"} · ${cur.q}ª quincena de ${MESES[cur.m]}</p>
-      <div class="ciclo">
-        <div class="box"><div class="k">Gastos</div><div class="v gas">${money(v.tGastos)}</div></div>
-        <div class="box"><div class="k">Fijos pagados</div><div class="v fij">${money(v.tFijos)}</div></div>
+      <div class="grid3">
+        <div class="stat"><div class="k">Pagado</div><div class="v ing">${money(pag)}</div></div>
+        <div class="stat"><div class="k">Queda por pagar</div><div class="v gas">${money(pen)}</div></div>
+        <div class="stat"><div class="k">Total de la quincena</div><div class="v cre">${money(salida)}</div></div>
       </div>
-      <div class="ciclo"><div class="box" style="grid-column:1/-1">
-        <div class="k">Total de la quincena</div>
-        <div class="v" style="color:${cred?"var(--credito)":"var(--gasto)"}">${money(salida)}</div>
-        ${v.tPend>0?`<div class="d">Fijos sin pagar todavía: ${money(v.tPend)}</div>`:""}
-        ${v.tIng>0?`<div class="d">Entró por esta cuenta: ${money(v.tIng)}</div>`:""}
-      </div></div>
-      ${v.gastos.length?`<ul class="list" style="margin-top:10px">${lin(v.gastos,"")}</ul>`:""}
-      ${v.fijos.length?`<ul class="list">${lin(v.fijos,"var(--fijo)")}</ul>`:""}
-      ${salida===0?`<p class="empty">Sin movimientos en esta quincena.</p>`:""}
+      ${v.tPend>0?`<p class="muted" style="margin:8px 0 0">Fijos sin marcar como pagados: ${money(v.tPend)}</p>`:""}
+      ${v.tIng>0?`<p class="muted" style="margin:6px 0 0">Entró por esta cuenta: ${money(v.tIng)}</p>`:""}
+      ${todos.length?`<ul class="list" style="margin-top:10px">${lin(todos)}</ul>`
+        :`<p class="empty">Sin movimientos en esta quincena.</p>`}
     </div>`;
   }).join("");
 
@@ -1022,6 +1027,12 @@ function vTarjetas(){
     if(o.tipo==="credito"){o.diaCorte=clampDia(document.getElementById("nCorte").value);o.diaPago=clampDia(document.getElementById("nPago").value);}
     S.cuentas.push(o); save(); render(); toast("Cuenta agregada.");
   };
+  app.querySelectorAll("[data-cargo]").forEach(ch=>ch.onchange=()=>{
+    S.pagosCorte=S.pagosCorte||{};
+    const kk=ch.dataset.cargo;
+    if(ch.checked) S.pagosCorte[kk]={pagado:true,fecha:hoyISO}; else delete S.pagosCorte[kk];
+    save(); render();
+  });
   app.querySelectorAll("[data-vercta]").forEach(b=>b.onclick=()=>verCuenta(b.dataset.vercta));
   app.querySelectorAll("[data-editc]").forEach(b=>b.onclick=()=>editarCuenta(b.dataset.editc));
   app.querySelectorAll("[data-pagar]").forEach(b=>b.onclick=()=>{
